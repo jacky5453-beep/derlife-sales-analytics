@@ -537,6 +537,9 @@ function formatCurrency(n) { return '$' + Math.round(n).toLocaleString('zh-TW');
 function formatNumber(n) { return Math.round(n).toLocaleString('zh-TW'); }
 function formatPercent(n) { return (n * 100).toFixed(1) + '%'; }
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+function withTimeout(promise, ms) {
+    return Promise.race([promise, new Promise((_,reject) => setTimeout(() => reject(new Error('timeout')), ms))]);
+}
 
 // ============================
 // 儀表板
@@ -713,22 +716,33 @@ async function startImport() {
     const batchDate = new Date().toISOString(), batchId = batchDate.split('T')[0]+'_'+Date.now();
     let imported = 0; const total = pendingImportData.length;
     // 用 doc ID = orderId_productId 做天然去重（set 會覆蓋，不需先讀取）
-    const BATCH_SIZE = 400;
+    const BATCH_SIZE = 200;
+    let failCount = 0;
     for (let i = 0; i < total; i += BATCH_SIZE) {
         const batch = db.batch();
         const chunk = pendingImportData.slice(i, i + BATCH_SIZE);
         chunk.forEach(row => {
             const docId = row.orderId + '_' + row.productId;
             const ref = db.collection(COLLECTION).doc(docId);
-            batch.set(ref, { ...row, importBatch: batchId, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+            batch.set(ref, { ...row, importBatch: batchId });
             imported++;
         });
-        try { await batch.commit(); } catch(e) { console.error('批次寫入失敗：', e); }
+        try {
+            await withTimeout(batch.commit(), 15000);
+        } catch(e) {
+            failCount++;
+            console.error('批次寫入失敗：', e.message);
+            document.getElementById('importDetail').textContent = `寫入中... 失敗 ${failCount} 批（${e.message}）`;
+            if (failCount >= 5) {
+                document.getElementById('importDetail').textContent = '寫入持續失敗，可能是 Firestore 每日配額已用完，請明天再試。';
+                break;
+            }
+        }
         const progress = Math.min(((i+chunk.length)/total)*100, 100);
         document.getElementById('importBar').style.width = progress+'%';
         document.getElementById('importPercent').textContent = Math.round(progress)+'%';
-        document.getElementById('importDetail').textContent = `已處理 ${Math.min(i+chunk.length,total)} / ${total} 筆`;
-        await sleep(200);
+        if (failCount === 0) document.getElementById('importDetail').textContent = `已處理 ${Math.min(i+chunk.length,total)} / ${total} 筆`;
+        await sleep(300);
     }
     // 記錄批次
     try { await db.collection(BATCH_COLLECTION).doc(batchId).set({ batchId, date: batchDate, totalRows: total, imported, skipped: 0, fileName: document.getElementById('previewFileName').textContent }); } catch(e) {}
