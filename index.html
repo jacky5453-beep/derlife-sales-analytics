@@ -1,0 +1,850 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>得來素官網銷售分析系統</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+    <!-- SheetJS -->
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
+    <!-- Firebase SDK -->
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        brand: '#C3F000',
+                        'brand-orange': '#FFAA00',
+                        'brand-dark': '#1A1A16',
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #f1f1f1; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb { background: #ccc; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #aaa; }
+        .tab-btn { transition: all 0.2s ease; }
+        .tab-btn.active { border-bottom: 3px solid #C3F000; color: #C3F000; font-weight: 600; }
+        .kpi-card { transition: transform 0.2s ease, box-shadow 0.2s ease; }
+        .kpi-card:hover { transform: translateY(-2px); box-shadow: 0 8px 25px rgba(0,0,0,0.15); }
+        .drop-zone { transition: all 0.3s ease; }
+        .drop-zone.drag-over { border-color: #C3F000; background: rgba(195, 240, 0, 0.05); }
+        .progress-bar { transition: width 0.3s ease; }
+        .data-table th { position: sticky; top: 0; z-index: 10; }
+        @keyframes spin { to { transform: rotate(360deg); } }
+        .loading-spinner { animation: spin 1s linear infinite; }
+        .chart-container { position: relative; width: 100%; }
+        .table-responsive { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    </style>
+</head>
+<body class="bg-gray-50 min-h-screen">
+
+    <!-- ==================== 登入畫面 ==================== -->
+    <div id="loginScreen" class="min-h-screen flex items-center justify-center bg-brand-dark">
+        <div class="text-center p-8">
+            <img src="logo.png" alt="得來素" class="h-16 w-auto mx-auto mb-6" onerror="this.style.display='none'">
+            <h1 class="text-2xl font-bold mb-2" style="color: #C3F000;">官網銷售分析系統</h1>
+            <p class="text-gray-400 text-sm mb-8">DerLife Website Sales Analytics</p>
+            <button onclick="googleLogin()" id="loginBtn" class="px-6 py-3 bg-white text-brand-dark font-semibold rounded-lg shadow-lg hover:shadow-xl transition flex items-center gap-3 mx-auto">
+                <svg width="20" height="20" viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"/><path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"/><path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"/><path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"/></svg>
+                使用 Google 帳號登入
+            </button>
+            <p id="loginError" class="text-red-400 text-sm mt-4 hidden"></p>
+            <p id="loginLoading" class="text-gray-500 text-sm mt-4 hidden">驗證中...</p>
+        </div>
+    </div>
+
+    <!-- ==================== 主應用 ==================== -->
+    <div id="mainApp" class="hidden">
+        <!-- Header -->
+        <header class="bg-brand-dark text-white sticky top-0 z-50 shadow-lg">
+            <div class="max-w-7xl mx-auto px-4 py-3 flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                    <img src="logo.png" alt="得來素" class="h-8 w-auto" onerror="this.style.display='none'">
+                    <div>
+                        <h1 class="text-lg font-bold" style="color: #C3F000;">官網銷售分析系統</h1>
+                        <p class="text-xs text-gray-400">DerLife Website Sales Analytics</p>
+                    </div>
+                </div>
+                <div class="flex items-center gap-3">
+                    <span id="dataStatus" class="text-xs text-gray-400 hidden md:inline">尚未載入資料</span>
+                    <span id="loadingIndicator" class="hidden">
+                        <svg class="loading-spinner h-5 w-5 text-brand" viewBox="0 0 24 24" fill="none">
+                            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-dasharray="31.4 31.4" />
+                        </svg>
+                    </span>
+                    <div class="flex items-center gap-2">
+                        <img id="userAvatar" src="" class="h-7 w-7 rounded-full hidden" referrerpolicy="no-referrer">
+                        <span id="userName" class="text-xs text-gray-300 hidden md:inline"></span>
+                        <button onclick="logout()" class="text-xs text-gray-400 hover:text-white ml-1" title="登出">登出</button>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Tab 導覽 -->
+        <nav class="bg-white border-b shadow-sm sticky top-[56px] z-40">
+            <div class="max-w-7xl mx-auto px-4">
+                <div class="flex overflow-x-auto gap-1 -mb-px" id="tabNav">
+                    <button class="tab-btn active px-4 py-3 text-sm whitespace-nowrap text-gray-600" data-tab="dashboard" onclick="switchTab('dashboard')">📊 儀表板</button>
+                    <button class="tab-btn px-4 py-3 text-sm whitespace-nowrap text-gray-600" data-tab="products" onclick="switchTab('products')">📦 商品分析</button>
+                    <button class="tab-btn px-4 py-3 text-sm whitespace-nowrap text-gray-600" data-tab="customers" onclick="switchTab('customers')">👥 顧客分析</button>
+                    <button class="tab-btn px-4 py-3 text-sm whitespace-nowrap text-gray-600" data-tab="import" onclick="switchTab('import')">📥 資料匯入</button>
+                    <button class="tab-btn px-4 py-3 text-sm whitespace-nowrap text-gray-600" data-tab="data" onclick="switchTab('data')">🗄️ 資料管理</button>
+                    <button class="tab-btn px-4 py-3 text-sm whitespace-nowrap text-gray-600 hidden" data-tab="admin" id="tabAdminBtn" onclick="switchTab('admin')">⚙️ 權限管理</button>
+                </div>
+            </div>
+        </nav>
+
+        <!-- 篩選器 -->
+        <div id="filterBar" class="bg-white border-b">
+            <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
+                <label class="text-sm font-medium text-gray-600">篩選條件：</label>
+                <select id="filterYear" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
+                    <option value="all">全部年度</option>
+                </select>
+                <select id="filterMonth" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
+                    <option value="all">全部月份</option>
+                    <option value="1">1 月</option><option value="2">2 月</option><option value="3">3 月</option>
+                    <option value="4">4 月</option><option value="5">5 月</option><option value="6">6 月</option>
+                    <option value="7">7 月</option><option value="8">8 月</option><option value="9">9 月</option>
+                    <option value="10">10 月</option><option value="11">11 月</option><option value="12">12 月</option>
+                </select>
+                <select id="filterStatus" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
+                    <option value="all">全部狀態</option>
+                </select>
+                <button onclick="resetFilters()" class="text-xs text-gray-500 hover:text-brand-dark underline">重置篩選</button>
+            </div>
+        </div>
+
+        <!-- 主內容區 -->
+        <main class="max-w-7xl mx-auto px-4 py-6">
+
+            <!-- 儀表板 -->
+            <section id="tab-dashboard" class="tab-content">
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border">
+                        <p class="text-xs text-gray-500 mb-1">營業額</p>
+                        <p class="text-2xl font-bold text-brand-dark" id="kpiRevenue">$0</p>
+                    </div>
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border">
+                        <p class="text-xs text-gray-500 mb-1">訂單數</p>
+                        <p class="text-2xl font-bold text-brand-dark" id="kpiOrders">0</p>
+                    </div>
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border">
+                        <p class="text-xs text-gray-500 mb-1">客單價</p>
+                        <p class="text-2xl font-bold text-brand-dark" id="kpiAOV">$0</p>
+                    </div>
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border">
+                        <p class="text-xs text-gray-500 mb-1">商品銷售數量</p>
+                        <p class="text-2xl font-bold text-brand-dark" id="kpiQuantity">0</p>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">月度營業額趨勢</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartRevenueTrend"></canvas></div>
+                    </div>
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">月度訂單數趨勢</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartOrderTrend"></canvas></div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">訂單狀態分佈</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartOrderStatus"></canvas></div>
+                    </div>
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">月度客單價變化</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartAOVTrend"></canvas></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 商品分析 -->
+            <section id="tab-products" class="tab-content hidden">
+                <div class="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-6">
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border"><p class="text-xs text-gray-500 mb-1">商品種類數</p><p class="text-2xl font-bold text-brand-dark" id="kpiProductCount">0</p></div>
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border"><p class="text-xs text-gray-500 mb-1">最暢銷商品</p><p class="text-lg font-bold text-brand-dark truncate" id="kpiTopProduct">-</p></div>
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border"><p class="text-xs text-gray-500 mb-1">平均每筆訂單商品數</p><p class="text-2xl font-bold text-brand-dark" id="kpiAvgItems">0</p></div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-sm font-semibold text-gray-700">商品銷售排行（數量）</h3>
+                            <select id="productRankLimit" class="text-xs border rounded px-2 py-1" onchange="renderProductAnalysis()">
+                                <option value="10">Top 10</option><option value="20">Top 20</option><option value="50">Top 50</option>
+                            </select>
+                        </div>
+                        <div class="table-responsive max-h-[400px] overflow-y-auto">
+                            <table class="data-table w-full text-sm"><thead class="bg-gray-50"><tr>
+                                <th class="text-left px-3 py-2 text-gray-600">#</th><th class="text-left px-3 py-2 text-gray-600">商品名稱</th>
+                                <th class="text-right px-3 py-2 text-gray-600">銷售數量</th><th class="text-right px-3 py-2 text-gray-600">銷售金額</th>
+                            </tr></thead><tbody id="tableProductQty"></tbody></table>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">商品銷售排行（金額）</h3>
+                        <div class="table-responsive max-h-[400px] overflow-y-auto">
+                            <table class="data-table w-full text-sm"><thead class="bg-gray-50"><tr>
+                                <th class="text-left px-3 py-2 text-gray-600">#</th><th class="text-left px-3 py-2 text-gray-600">商品名稱</th>
+                                <th class="text-right px-3 py-2 text-gray-600">銷售金額</th><th class="text-right px-3 py-2 text-gray-600">佔比</th>
+                            </tr></thead><tbody id="tableProductRevenue"></tbody></table>
+                        </div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl p-5 shadow-sm border mb-6">
+                    <h3 class="text-sm font-semibold text-gray-700 mb-3">商品貢獻度分析（帕累托圖）</h3>
+                    <div class="chart-container" style="height:350px;"><canvas id="chartPareto"></canvas></div>
+                </div>
+            </section>
+
+            <!-- 顧客分析 -->
+            <section id="tab-customers" class="tab-content hidden">
+                <div class="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border"><p class="text-xs text-gray-500 mb-1">顧客總數</p><p class="text-2xl font-bold text-brand-dark" id="kpiCustomerCount">0</p></div>
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border"><p class="text-xs text-gray-500 mb-1">平均消費金額</p><p class="text-2xl font-bold text-brand-dark" id="kpiAvgSpend">$0</p></div>
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border"><p class="text-xs text-gray-500 mb-1">平均購買次數</p><p class="text-2xl font-bold text-brand-dark" id="kpiAvgFreq">0</p></div>
+                    <div class="kpi-card bg-white rounded-xl p-5 shadow-sm border"><p class="text-xs text-gray-500 mb-1">回購率</p><p class="text-2xl font-bold text-brand-dark" id="kpiRepeatRate">0%</p></div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <div class="flex items-center justify-between mb-3">
+                            <h3 class="text-sm font-semibold text-gray-700">顧客貢獻度排行</h3>
+                            <select id="customerRankLimit" class="text-xs border rounded px-2 py-1" onchange="renderCustomerAnalysis()">
+                                <option value="20">Top 20</option><option value="50">Top 50</option><option value="100">Top 100</option>
+                            </select>
+                        </div>
+                        <div class="table-responsive max-h-[500px] overflow-y-auto">
+                            <table class="data-table w-full text-sm"><thead class="bg-gray-50"><tr>
+                                <th class="text-left px-3 py-2 text-gray-600">#</th><th class="text-left px-3 py-2 text-gray-600">顧客</th>
+                                <th class="text-right px-3 py-2 text-gray-600">累計消費</th><th class="text-right px-3 py-2 text-gray-600">訂單數</th>
+                                <th class="text-right px-3 py-2 text-gray-600">客單價</th>
+                            </tr></thead><tbody id="tableCustomerRank"></tbody></table>
+                        </div>
+                    </div>
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">顧客終身價值（CLV）排行</h3>
+                        <div class="table-responsive max-h-[500px] overflow-y-auto">
+                            <table class="data-table w-full text-sm"><thead class="bg-gray-50"><tr>
+                                <th class="text-left px-3 py-2 text-gray-600">#</th><th class="text-left px-3 py-2 text-gray-600">顧客</th>
+                                <th class="text-right px-3 py-2 text-gray-600">CLV 估算</th><th class="text-right px-3 py-2 text-gray-600">購買頻率</th>
+                                <th class="text-right px-3 py-2 text-gray-600">最近購買</th>
+                            </tr></thead><tbody id="tableCustomerCLV"></tbody></table>
+                        </div>
+                    </div>
+                </div>
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6">
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">顧客購買次數分佈</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartFreqDist"></canvas></div>
+                    </div>
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">顧客購買金額分佈</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartSpendDist"></canvas></div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 資料匯入 -->
+            <section id="tab-import" class="tab-content hidden">
+                <div class="max-w-2xl mx-auto">
+                    <div class="bg-white rounded-xl p-6 shadow-sm border mb-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">匯入官網訂單資料</h3>
+                        <p class="text-sm text-gray-500 mb-4">支援官網匯出的 .xlsx 或 .csv 檔案，系統會自動對應欄位並去除重複資料。</p>
+                        <div id="dropZone" class="drop-zone border-2 border-dashed border-gray-300 rounded-xl p-10 text-center cursor-pointer hover:border-brand" onclick="document.getElementById('fileInput').click()">
+                            <svg class="mx-auto h-12 w-12 text-gray-400 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" /></svg>
+                            <p class="text-sm text-gray-600">拖拽檔案到此處，或<span class="text-brand-dark font-semibold">點擊選擇檔案</span></p>
+                            <p class="text-xs text-gray-400 mt-1">支援 .xlsx、.csv 格式</p>
+                        </div>
+                        <input type="file" id="fileInput" class="hidden" accept=".xlsx,.csv" onchange="handleFileSelect(event)">
+                        <div id="importPreview" class="hidden mt-4 p-4 bg-gray-50 rounded-lg">
+                            <h4 class="text-sm font-semibold text-gray-700 mb-2">匯入預覽</h4>
+                            <div class="grid grid-cols-2 gap-3 text-sm">
+                                <div><span class="text-gray-500">檔案名稱：</span><span id="previewFileName" class="font-medium"></span></div>
+                                <div><span class="text-gray-500">資料筆數：</span><span id="previewRowCount" class="font-medium"></span></div>
+                                <div><span class="text-gray-500">日期範圍：</span><span id="previewDateRange" class="font-medium"></span></div>
+                                <div><span class="text-gray-500">訂單數量：</span><span id="previewOrderCount" class="font-medium"></span></div>
+                            </div>
+                            <div class="flex gap-3 mt-4">
+                                <button onclick="startImport()" class="px-4 py-2 bg-brand-dark text-brand text-sm font-semibold rounded-lg hover:opacity-90">確認匯入</button>
+                                <button onclick="cancelImport()" class="px-4 py-2 bg-gray-200 text-gray-600 text-sm rounded-lg hover:bg-gray-300">取消</button>
+                            </div>
+                        </div>
+                        <div id="importProgress" class="hidden mt-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm text-gray-600">匯入中...</span>
+                                <span class="text-sm font-medium" id="importPercent">0%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2.5"><div class="progress-bar bg-brand h-2.5 rounded-full" id="importBar" style="width:0%"></div></div>
+                            <p class="text-xs text-gray-400 mt-2" id="importDetail"></p>
+                        </div>
+                        <div id="importResult" class="hidden mt-4 p-4 rounded-lg"><p class="text-sm font-medium" id="importResultText"></p></div>
+                    </div>
+                    <div class="bg-white rounded-xl p-6 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">匯入歷史紀錄</h3>
+                        <div id="importHistory" class="text-sm text-gray-500">尚無匯入紀錄</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 資料管理 -->
+            <section id="tab-data" class="tab-content hidden">
+                <div class="bg-white rounded-xl p-5 shadow-sm border mb-6">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <h3 class="text-lg font-semibold text-gray-800">資料庫概覽</h3>
+                        <button onclick="loadAllData()" class="px-3 py-1.5 bg-brand-dark text-brand text-sm font-semibold rounded-lg hover:opacity-90">重新載入資料</button>
+                    </div>
+                    <div class="grid grid-cols-2 lg:grid-cols-4 gap-4">
+                        <div class="p-3 bg-gray-50 rounded-lg"><p class="text-xs text-gray-500">總明細筆數</p><p class="text-xl font-bold text-brand-dark" id="dbTotalRows">0</p></div>
+                        <div class="p-3 bg-gray-50 rounded-lg"><p class="text-xs text-gray-500">不重複訂單數</p><p class="text-xl font-bold text-brand-dark" id="dbUniqueOrders">0</p></div>
+                        <div class="p-3 bg-gray-50 rounded-lg"><p class="text-xs text-gray-500">資料日期範圍</p><p class="text-sm font-bold text-brand-dark" id="dbDateRange">-</p></div>
+                        <div class="p-3 bg-gray-50 rounded-lg"><p class="text-xs text-gray-500">匯入批次數</p><p class="text-xl font-bold text-brand-dark" id="dbBatchCount">0</p></div>
+                    </div>
+                </div>
+                <div class="bg-white rounded-xl p-5 shadow-sm border">
+                    <div class="flex flex-wrap items-center justify-between gap-3 mb-4">
+                        <h3 class="text-sm font-semibold text-gray-700">訂單明細瀏覽</h3>
+                        <div class="flex items-center gap-2">
+                            <input type="text" id="dataSearch" placeholder="搜尋訂單編號或商品..." class="border rounded-lg px-3 py-1.5 text-sm w-48 focus:ring-2 focus:ring-brand outline-none" oninput="filterDataTable()">
+                            <select id="dataBatch" class="border rounded-lg px-3 py-1.5 text-sm" onchange="filterDataTable()"><option value="all">全部批次</option></select>
+                        </div>
+                    </div>
+                    <div class="table-responsive max-h-[500px] overflow-y-auto">
+                        <table class="data-table w-full text-sm"><thead class="bg-gray-50"><tr>
+                            <th class="text-left px-3 py-2 text-gray-600">訂單編號</th><th class="text-left px-3 py-2 text-gray-600">日期</th>
+                            <th class="text-left px-3 py-2 text-gray-600">顧客</th><th class="text-left px-3 py-2 text-gray-600">商品名稱</th>
+                            <th class="text-right px-3 py-2 text-gray-600">數量</th><th class="text-right px-3 py-2 text-gray-600">小計</th>
+                            <th class="text-left px-3 py-2 text-gray-600">狀態</th><th class="text-left px-3 py-2 text-gray-600">批次</th>
+                        </tr></thead><tbody id="tableDataBrowse"></tbody></table>
+                    </div>
+                    <div class="flex items-center justify-between mt-3">
+                        <p class="text-xs text-gray-400" id="dataTableInfo">顯示 0 筆</p>
+                        <div class="flex gap-2">
+                            <button onclick="dataTablePrev()" class="px-3 py-1 text-xs border rounded hover:bg-gray-50" id="btnDataPrev" disabled>上一頁</button>
+                            <button onclick="dataTableNext()" class="px-3 py-1 text-xs border rounded hover:bg-gray-50" id="btnDataNext" disabled>下一頁</button>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 權限管理（admin only） -->
+            <section id="tab-admin" class="tab-content hidden">
+                <div class="max-w-2xl mx-auto">
+                    <div class="bg-white rounded-xl p-6 shadow-sm border mb-6">
+                        <h3 class="text-lg font-semibold text-gray-800 mb-4">白名單管理</h3>
+                        <p class="text-sm text-gray-500 mb-4">管理可以登入此系統的 Google 帳號。</p>
+                        <div class="flex gap-2 mb-4">
+                            <input type="email" id="newWhitelistEmail" placeholder="輸入 Google Email..." class="flex-1 border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand outline-none">
+                            <select id="newWhitelistRole" class="border rounded-lg px-3 py-2 text-sm">
+                                <option value="viewer">檢視者</option><option value="admin">管理員</option>
+                            </select>
+                            <button onclick="addWhitelist()" class="px-4 py-2 bg-brand-dark text-brand text-sm font-semibold rounded-lg hover:opacity-90">新增</button>
+                        </div>
+                        <div id="whitelistTable" class="text-sm">載入中...</div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- 無資料提示 -->
+            <div id="noDataHint" class="hidden text-center py-20">
+                <svg class="mx-auto h-16 w-16 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4" /></svg>
+                <p class="text-gray-500 text-lg font-medium">尚未載入資料</p>
+                <p class="text-gray-400 text-sm mt-1">請先到「資料匯入」頁面匯入官網訂單資料</p>
+                <button onclick="switchTab('import')" class="mt-4 px-4 py-2 bg-brand-dark text-brand text-sm font-semibold rounded-lg hover:opacity-90">前往匯入資料</button>
+            </div>
+        </main>
+        <footer class="text-center py-4 text-xs text-gray-400 border-t mt-8">得來素企業有限公司 &copy; 2025-2026 | 官網銷售分析系統 v1.1</footer>
+    </div>
+
+<script>
+// ============================
+// Firebase 設定
+// ============================
+const firebaseConfig = {
+    apiKey: "AIzaSyCMnHuSPNX8kJC53eYgWHXUV4BQjXhM7uo",
+    authDomain: "derlife-audit.firebaseapp.com",
+    projectId: "derlife-audit",
+    storageBucket: "derlife-audit.firebasestorage.app",
+    messagingSenderId: "992417419976",
+    appId: "1:992417419976:web:8b44d06620ca2e8cd5cbfd"
+};
+firebase.initializeApp(firebaseConfig);
+const auth = firebase.auth();
+const db = firebase.firestore();
+const COLLECTION = 'website-orders';
+const BATCH_COLLECTION = 'import-batches';
+const WHITELIST_COLLECTION = 'sales-whitelist';
+
+// ============================
+// 全域變數
+// ============================
+let allData = [], filteredData = [], pendingImportData = [];
+let charts = {}, dataTablePage = 0;
+const DATA_PAGE_SIZE = 100;
+let currentUser = null, isAdmin = false;
+
+// ============================
+// 登入系統
+// ============================
+async function googleLogin() {
+    document.getElementById('loginBtn').disabled = true;
+    document.getElementById('loginLoading').classList.remove('hidden');
+    document.getElementById('loginError').classList.add('hidden');
+    try {
+        const provider = new firebase.auth.GoogleAuthProvider();
+        const result = await auth.signInWithPopup(provider);
+        await verifyWhitelist(result.user);
+    } catch (e) {
+        document.getElementById('loginError').textContent = '登入失敗：' + e.message;
+        document.getElementById('loginError').classList.remove('hidden');
+        document.getElementById('loginBtn').disabled = false;
+        document.getElementById('loginLoading').classList.add('hidden');
+    }
+}
+
+async function verifyWhitelist(user) {
+    const email = user.email;
+    // 檢查白名單是否有任何文件（第一位登入者自動成為 admin）
+    const allDocs = await db.collection(WHITELIST_COLLECTION).limit(1).get();
+    if (allDocs.empty) {
+        // 第一位登入者，自動加入為 admin
+        await db.collection(WHITELIST_COLLECTION).doc(email).set({
+            email, role: 'admin',
+            addedAt: firebase.firestore.FieldValue.serverTimestamp(),
+            addedBy: 'system-first-user'
+        });
+        showApp(user, true);
+        return;
+    }
+    // 檢查此 email 是否在白名單
+    const doc = await db.collection(WHITELIST_COLLECTION).doc(email).get();
+    if (!doc.exists) {
+        await auth.signOut();
+        document.getElementById('loginError').textContent = '您的帳號未被授權使用此系統，請聯繫管理員。';
+        document.getElementById('loginError').classList.remove('hidden');
+        document.getElementById('loginBtn').disabled = false;
+        document.getElementById('loginLoading').classList.add('hidden');
+        return;
+    }
+    showApp(user, doc.data().role === 'admin');
+}
+
+function showApp(user, admin) {
+    currentUser = user;
+    isAdmin = admin;
+    document.getElementById('loginScreen').classList.add('hidden');
+    document.getElementById('mainApp').classList.remove('hidden');
+    // 更新 header 使用者資訊
+    if (user.photoURL) {
+        document.getElementById('userAvatar').src = user.photoURL;
+        document.getElementById('userAvatar').classList.remove('hidden');
+    }
+    document.getElementById('userName').textContent = user.displayName || user.email;
+    document.getElementById('userName').classList.remove('hidden');
+    // Admin 才顯示權限管理 Tab
+    if (isAdmin) document.getElementById('tabAdminBtn').classList.remove('hidden');
+    // 初始化應用
+    initApp();
+}
+
+async function logout() {
+    await auth.signOut();
+    currentUser = null; isAdmin = false;
+    document.getElementById('mainApp').classList.add('hidden');
+    document.getElementById('loginScreen').classList.remove('hidden');
+    document.getElementById('loginBtn').disabled = false;
+    document.getElementById('loginLoading').classList.add('hidden');
+    document.getElementById('loginError').classList.add('hidden');
+}
+
+// 自動登入檢查
+auth.onAuthStateChanged(async (user) => {
+    if (user) {
+        document.getElementById('loginLoading').classList.remove('hidden');
+        await verifyWhitelist(user);
+    }
+});
+
+// ============================
+// Tab 切換
+// ============================
+function switchTab(tabName) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+    const target = document.getElementById('tab-' + tabName);
+    if (target) target.classList.remove('hidden');
+    const btn = document.querySelector(`.tab-btn[data-tab="${tabName}"]`);
+    if (btn) btn.classList.add('active');
+    document.getElementById('filterBar').style.display = ['dashboard', 'products', 'customers'].includes(tabName) ? '' : 'none';
+    if (tabName === 'admin') loadWhitelist();
+    checkNoData(tabName);
+}
+
+function checkNoData(tabName) {
+    const hint = document.getElementById('noDataHint');
+    if (['dashboard', 'products', 'customers'].includes(tabName) && allData.length === 0) {
+        hint.classList.remove('hidden');
+        document.getElementById('tab-' + tabName).classList.add('hidden');
+    } else { hint.classList.add('hidden'); }
+}
+
+// ============================
+// 篩選器
+// ============================
+function applyFilters() {
+    const year = document.getElementById('filterYear').value;
+    const month = document.getElementById('filterMonth').value;
+    const status = document.getElementById('filterStatus').value;
+    filteredData = allData.filter(row => {
+        const d = new Date(row.orderDate);
+        if (year !== 'all' && d.getFullYear() !== parseInt(year)) return false;
+        if (month !== 'all' && (d.getMonth() + 1) !== parseInt(month)) return false;
+        if (status !== 'all' && row.orderStatus !== status) return false;
+        return true;
+    });
+    renderDashboard(); renderProductAnalysis(); renderCustomerAnalysis();
+}
+function resetFilters() {
+    document.getElementById('filterYear').value = 'all';
+    document.getElementById('filterMonth').value = 'all';
+    document.getElementById('filterStatus').value = 'all';
+    applyFilters();
+}
+function populateFilters() {
+    const years = new Set(), statuses = new Set();
+    allData.forEach(row => { years.add(new Date(row.orderDate).getFullYear()); if (row.orderStatus) statuses.add(row.orderStatus); });
+    const ys = document.getElementById('filterYear'); ys.innerHTML = '<option value="all">全部年度</option>';
+    [...years].sort().forEach(y => { ys.innerHTML += `<option value="${y}">${y} 年</option>`; });
+    const ss = document.getElementById('filterStatus'); ss.innerHTML = '<option value="all">全部狀態</option>';
+    [...statuses].sort().forEach(s => { ss.innerHTML += `<option value="${s}">${s}</option>`; });
+}
+
+// ============================
+// 工具函數
+// ============================
+function formatCurrency(n) { return '$' + Math.round(n).toLocaleString('zh-TW'); }
+function formatNumber(n) { return Math.round(n).toLocaleString('zh-TW'); }
+function formatPercent(n) { return (n * 100).toFixed(1) + '%'; }
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+
+// ============================
+// 儀表板
+// ============================
+function renderDashboard() {
+    const data = filteredData; if (!data.length) return;
+    const orderMap = new Map(); let totalQty = 0;
+    data.forEach(row => { if (!orderMap.has(row.orderId)) orderMap.set(row.orderId, row.orderTotal); totalQty += row.quantity; });
+    const revenue = [...orderMap.values()].reduce((a, b) => a + b, 0);
+    const orderCount = orderMap.size, aov = orderCount > 0 ? revenue / orderCount : 0;
+    document.getElementById('kpiRevenue').textContent = formatCurrency(revenue);
+    document.getElementById('kpiOrders').textContent = formatNumber(orderCount);
+    document.getElementById('kpiAOV').textContent = formatCurrency(aov);
+    document.getElementById('kpiQuantity').textContent = formatNumber(totalQty);
+    // 月度資料
+    const md = new Map();
+    data.forEach(row => {
+        const d = new Date(row.orderDate), key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        if (!md.has(key)) md.set(key, { rev: new Map(), ord: new Set() });
+        const m = md.get(key); if (!m.rev.has(row.orderId)) m.rev.set(row.orderId, row.orderTotal); m.ord.add(row.orderId);
+    });
+    const sm = [...md.keys()].sort();
+    const mRev = sm.map(k => [...md.get(k).rev.values()].reduce((a,b)=>a+b,0));
+    const mOrd = sm.map(k => md.get(k).ord.size);
+    const mAov = sm.map((k,i) => mOrd[i]>0 ? mRev[i]/mOrd[i] : 0);
+    renderChart('chartRevenueTrend','line',{labels:sm,datasets:[{label:'營業額',data:mRev,borderColor:'#C3F000',backgroundColor:'rgba(195,240,0,0.1)',fill:true,tension:0.3,pointRadius:4}]},{scales:{y:{beginAtZero:true,ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}}}});
+    renderChart('chartOrderTrend','bar',{labels:sm,datasets:[{label:'訂單數',data:mOrd,backgroundColor:'rgba(255,170,0,0.7)',borderRadius:4}]},{scales:{y:{beginAtZero:true}}});
+    // 狀態分佈
+    const sc = new Map(), so = new Map();
+    data.forEach(row => { if (!so.has(row.orderId)) { so.set(row.orderId, row.orderStatus); sc.set(row.orderStatus, (sc.get(row.orderStatus)||0)+1); }});
+    const sl = [...sc.keys()], sv = sl.map(k=>sc.get(k));
+    const colors = ['#C3F000','#FFAA00','#4ECDC4','#FF6B6B','#45B7D1','#96CEB4','#DDA0DD','#778899'];
+    renderChart('chartOrderStatus','doughnut',{labels:sl,datasets:[{data:sv,backgroundColor:colors.slice(0,sl.length)}]},{plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}});
+    renderChart('chartAOVTrend','line',{labels:sm,datasets:[{label:'客單價',data:mAov,borderColor:'#FFAA00',backgroundColor:'rgba(255,170,0,0.1)',fill:true,tension:0.3,pointRadius:4}]},{scales:{y:{beginAtZero:false,ticks:{callback:v=>'$'+Math.round(v)}}}});
+}
+
+// ============================
+// 商品分析
+// ============================
+function renderProductAnalysis() {
+    const data = filteredData; if (!data.length) return;
+    const limit = parseInt(document.getElementById('productRankLimit').value);
+    const pm = new Map();
+    data.forEach(row => { if (!pm.has(row.productName)) pm.set(row.productName,{name:row.productName,qty:0,revenue:0}); const p=pm.get(row.productName); p.qty+=row.quantity; p.revenue+=row.subtotal; });
+    const products = [...pm.values()], totalRev = products.reduce((a,b)=>a+b.revenue,0);
+    const oi = new Map(); data.forEach(row => { oi.set(row.orderId, (oi.get(row.orderId)||0)+row.quantity); });
+    const avgItems = oi.size>0 ? [...oi.values()].reduce((a,b)=>a+b,0)/oi.size : 0;
+    document.getElementById('kpiProductCount').textContent = formatNumber(products.length);
+    const top = [...products].sort((a,b)=>b.qty-a.qty)[0];
+    document.getElementById('kpiTopProduct').textContent = top ? top.name : '-';
+    document.getElementById('kpiAvgItems').textContent = avgItems.toFixed(1);
+    const byQty = [...products].sort((a,b)=>b.qty-a.qty).slice(0,limit);
+    document.getElementById('tableProductQty').innerHTML = byQty.map((p,i)=>`<tr class="border-b hover:bg-gray-50"><td class="px-3 py-2 text-gray-400">${i+1}</td><td class="px-3 py-2">${p.name}</td><td class="px-3 py-2 text-right font-medium">${formatNumber(p.qty)}</td><td class="px-3 py-2 text-right text-gray-500">${formatCurrency(p.revenue)}</td></tr>`).join('');
+    const byRev = [...products].sort((a,b)=>b.revenue-a.revenue).slice(0,limit);
+    document.getElementById('tableProductRevenue').innerHTML = byRev.map((p,i)=>`<tr class="border-b hover:bg-gray-50"><td class="px-3 py-2 text-gray-400">${i+1}</td><td class="px-3 py-2">${p.name}</td><td class="px-3 py-2 text-right font-medium">${formatCurrency(p.revenue)}</td><td class="px-3 py-2 text-right text-gray-500">${formatPercent(p.revenue/totalRev)}</td></tr>`).join('');
+    // 帕累托圖
+    const pd = [...products].sort((a,b)=>b.revenue-a.revenue).slice(0,20);
+    let cum = 0; const cp = pd.map(p=>{cum+=p.revenue;return (cum/totalRev)*100;});
+    renderChart('chartPareto','bar',{labels:pd.map(p=>p.name.length>8?p.name.substring(0,8)+'...':p.name),datasets:[{label:'銷售金額',data:pd.map(p=>p.revenue),backgroundColor:'rgba(195,240,0,0.7)',borderRadius:4,yAxisID:'y'},{label:'累計佔比 %',data:cp,type:'line',borderColor:'#FFAA00',pointRadius:3,yAxisID:'y1',tension:0.3}]},{scales:{y:{beginAtZero:true,position:'left',ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}},y1:{beginAtZero:true,max:100,position:'right',grid:{drawOnChartArea:false},ticks:{callback:v=>v+'%'}},x:{ticks:{font:{size:10},maxRotation:45}}}});
+}
+
+// ============================
+// 顧客分析（用 姓名+手機 識別）
+// ============================
+function renderCustomerAnalysis() {
+    const data = filteredData; if (!data.length) return;
+    const limit = parseInt(document.getElementById('customerRankLimit').value);
+    // 用 姓名+手機 做顧客 key
+    const cm = new Map();
+    data.forEach(row => {
+        const key = (row.memberName || '未知') + '_' + (row.phone || '');
+        if (!cm.has(key)) cm.set(key, { name: row.memberName || '未知', phone: row.phone || '', orders: new Map(), lastDate: null, firstDate: null });
+        const c = cm.get(key);
+        if (!c.orders.has(row.orderId)) c.orders.set(row.orderId, row.orderTotal);
+        const d = new Date(row.orderDate);
+        if (!c.lastDate || d > c.lastDate) c.lastDate = d;
+        if (!c.firstDate || d < c.firstDate) c.firstDate = d;
+    });
+    const customers = [...cm.values()].map(c => {
+        const spend = [...c.orders.values()].reduce((a,b)=>a+b,0);
+        const freq = c.orders.size, aov = freq>0?spend/freq:0;
+        const days = c.lastDate&&c.firstDate ? Math.max((c.lastDate-c.firstDate)/(1000*60*60*24),1) : 1;
+        const yFreq = freq>1 ? (freq/days)*365 : freq;
+        return { name: c.name, phone: c.phone, spend, freq, aov, clv: aov*yFreq, lastDate: c.lastDate };
+    });
+    const total = customers.length;
+    const avgSpend = total>0 ? customers.reduce((a,b)=>a+b.spend,0)/total : 0;
+    const avgFreq = total>0 ? customers.reduce((a,b)=>a+b.freq,0)/total : 0;
+    const repeatRate = total>0 ? customers.filter(c=>c.freq>1).length/total : 0;
+    document.getElementById('kpiCustomerCount').textContent = formatNumber(total);
+    document.getElementById('kpiAvgSpend').textContent = formatCurrency(avgSpend);
+    document.getElementById('kpiAvgFreq').textContent = avgFreq.toFixed(1)+' 次';
+    document.getElementById('kpiRepeatRate').textContent = formatPercent(repeatRate);
+    // 貢獻排行
+    const bySpend = [...customers].sort((a,b)=>b.spend-a.spend).slice(0,limit);
+    document.getElementById('tableCustomerRank').innerHTML = bySpend.map((c,i)=>`<tr class="border-b hover:bg-gray-50"><td class="px-3 py-2 text-gray-400">${i+1}</td><td class="px-3 py-2"><div class="font-medium">${c.name}</div><div class="text-xs text-gray-400">${c.phone?'0'+c.phone:''}</div></td><td class="px-3 py-2 text-right font-medium">${formatCurrency(c.spend)}</td><td class="px-3 py-2 text-right">${c.freq}</td><td class="px-3 py-2 text-right text-gray-500">${formatCurrency(c.aov)}</td></tr>`).join('');
+    // CLV 排行
+    const byCLV = [...customers].sort((a,b)=>b.clv-a.clv).slice(0,limit);
+    document.getElementById('tableCustomerCLV').innerHTML = byCLV.map((c,i)=>`<tr class="border-b hover:bg-gray-50"><td class="px-3 py-2 text-gray-400">${i+1}</td><td class="px-3 py-2"><div class="font-medium">${c.name}</div><div class="text-xs text-gray-400">${c.phone?'0'+c.phone:''}</div></td><td class="px-3 py-2 text-right font-medium">${formatCurrency(c.clv)}</td><td class="px-3 py-2 text-right">${c.freq} 次/期間</td><td class="px-3 py-2 text-right text-gray-500">${c.lastDate?c.lastDate.toLocaleDateString('zh-TW'):'-'}</td></tr>`).join('');
+    // 購買次數分佈
+    const fd = new Map();
+    customers.forEach(c => { const b = c.freq>=10?'10+':String(c.freq); fd.set(b,(fd.get(b)||0)+1); });
+    const fl = ['1','2','3','4','5','6','7','8','9','10+'], fv = fl.map(l=>fd.get(l)||0);
+    renderChart('chartFreqDist','bar',{labels:fl.map(l=>l+' 次'),datasets:[{label:'顧客數',data:fv,backgroundColor:'rgba(195,240,0,0.7)',borderRadius:4}]},{scales:{y:{beginAtZero:true}},plugins:{legend:{display:false}}});
+    // 購買金額分佈
+    const sb = [{label:'< $1K',min:0,max:1000},{label:'$1K-3K',min:1000,max:3000},{label:'$3K-5K',min:3000,max:5000},{label:'$5K-10K',min:5000,max:10000},{label:'$10K-20K',min:10000,max:20000},{label:'$20K-50K',min:20000,max:50000},{label:'$50K+',min:50000,max:Infinity}];
+    const spv = sb.map(b=>customers.filter(c=>c.spend>=b.min&&c.spend<b.max).length);
+    renderChart('chartSpendDist','bar',{labels:sb.map(b=>b.label),datasets:[{label:'顧客數',data:spv,backgroundColor:'rgba(255,170,0,0.7)',borderRadius:4}]},{scales:{y:{beginAtZero:true},x:{ticks:{font:{size:10}}}},plugins:{legend:{display:false}}});
+}
+
+// ============================
+// Chart.js
+// ============================
+function renderChart(id, type, data, opts={}) {
+    if (charts[id]) charts[id].destroy();
+    charts[id] = new Chart(document.getElementById(id).getContext('2d'), {
+        type, data,
+        options: { responsive:true, maintainAspectRatio:false, interaction:{intersect:false,mode:'index'},
+            plugins:{tooltip:{callbacks:{label:function(ctx){let l=ctx.dataset.label||'';if(l)l+=': ';const v=ctx.parsed.y??ctx.parsed;if(typeof v==='number'){if(l.includes('營業額')||l.includes('銷售金額')||l.includes('客單價'))l+='$'+Math.round(v).toLocaleString();else if(l.includes('%'))l+=v.toFixed(1)+'%';else l+=Math.round(v).toLocaleString();}return l;}}}, ...opts.plugins}, scales:opts.scales||{} }
+    });
+}
+
+// ============================
+// 匯入模組
+// ============================
+function setupDragDrop() {
+    const dz = document.getElementById('dropZone');
+    ['dragenter','dragover'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.add('drag-over'); }));
+    ['dragleave','drop'].forEach(e => dz.addEventListener(e, ev => { ev.preventDefault(); dz.classList.remove('drag-over'); }));
+    dz.addEventListener('drop', ev => { const f = ev.dataTransfer.files[0]; if (f) processFile(f); });
+}
+function handleFileSelect(e) { const f = e.target.files[0]; if (f) processFile(f); e.target.value = ''; }
+
+function processFile(file) {
+    const reader = new FileReader();
+    reader.onload = function(e) {
+        try {
+            const wb = XLSX.read(e.target.result, {type:'array',cellDates:true});
+            const json = XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]]);
+            if (!json.length) { alert('檔案中沒有資料！'); return; }
+            pendingImportData = json.map(row => {
+                const orderDate = parseDate(row['訂單日期']);
+                return {
+                    orderId: String(row['訂單編號']||''), orderDate, orderStatus: row['訂單狀態']||'',
+                    memberId: row['會員編號']||'', memberName: row['姓名']||'',
+                    phone: String(row['手機號碼']||''),
+                    productId: String(row['商品編號']||''), productName: row['商品名稱']||'',
+                    quantity: parseInt(row['數量'])||0, unitPrice: parseInt(row['商品售價'])||0,
+                    subtotal: parseInt(row['商品小計'])||0, orderTotal: parseInt(row['實際付款金額'])||0,
+                    shippingFee: parseInt(row['訂單運費'])||0,
+                    bonusEarned: parseInt(row['訂單獲得 紅利點數'])||0, bonusUsed: parseInt(row['訂單使用紅利點數'])||0,
+                };
+            }).filter(row => row.orderId && row.orderDate);
+            const dates = pendingImportData.map(r=>new Date(r.orderDate)).filter(d=>!isNaN(d));
+            const orders = new Set(pendingImportData.map(r=>r.orderId));
+            document.getElementById('previewFileName').textContent = file.name;
+            document.getElementById('previewRowCount').textContent = formatNumber(pendingImportData.length)+' 筆';
+            document.getElementById('previewDateRange').textContent = dates.length ? new Date(Math.min(...dates)).toLocaleDateString('zh-TW')+' ~ '+new Date(Math.max(...dates)).toLocaleDateString('zh-TW') : '-';
+            document.getElementById('previewOrderCount').textContent = formatNumber(orders.size)+' 筆';
+            document.getElementById('importPreview').classList.remove('hidden');
+            document.getElementById('importResult').classList.add('hidden');
+        } catch(err) { alert('檔案解析失敗：'+err.message); }
+    };
+    reader.readAsArrayBuffer(file);
+}
+function parseDate(val) { if (!val) return null; if (val instanceof Date) return val.toISOString(); const d = new Date(String(val).trim()); return isNaN(d.getTime()) ? null : d.toISOString(); }
+function cancelImport() { pendingImportData = []; document.getElementById('importPreview').classList.add('hidden'); }
+
+async function startImport() {
+    if (!pendingImportData.length) return;
+    document.getElementById('importPreview').classList.add('hidden');
+    document.getElementById('importProgress').classList.remove('hidden');
+    document.getElementById('importResult').classList.add('hidden');
+    const batchDate = new Date().toISOString(), batchId = batchDate.split('T')[0]+'_'+Date.now();
+    let imported = 0, skipped = 0; const total = pendingImportData.length;
+    // 取得已存在 key 做去重
+    const existingKeys = new Set();
+    try {
+        const snap = await db.collection(COLLECTION).select('orderId','productId').get();
+        snap.forEach(doc => { const d = doc.data(); existingKeys.add(d.orderId+'_'+d.productId); });
+    } catch(e) { console.warn('去重讀取失敗：', e); }
+    // 分批寫入（每批 400 筆，加延遲避免 quota）
+    const BATCH_SIZE = 400;
+    for (let i = 0; i < total; i += BATCH_SIZE) {
+        const batch = db.batch();
+        const chunk = pendingImportData.slice(i, i + BATCH_SIZE);
+        let batchHasData = false;
+        chunk.forEach(row => {
+            const key = row.orderId + '_' + row.productId;
+            if (existingKeys.has(key)) { skipped++; return; }
+            existingKeys.add(key);
+            const ref = db.collection(COLLECTION).doc();
+            batch.set(ref, { ...row, importBatch: batchId, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
+            imported++; batchHasData = true;
+        });
+        if (batchHasData) {
+            try { await batch.commit(); } catch(e) { console.error('批次寫入失敗：', e); }
+        }
+        const progress = Math.min(((i+chunk.length)/total)*100, 100);
+        document.getElementById('importBar').style.width = progress+'%';
+        document.getElementById('importPercent').textContent = Math.round(progress)+'%';
+        document.getElementById('importDetail').textContent = `已處理 ${Math.min(i+chunk.length,total)} / ${total} 筆`;
+        // 延遲 300ms 避免觸發 Firestore quota
+        if (batchHasData) await sleep(300);
+    }
+    // 記錄批次
+    try { await db.collection(BATCH_COLLECTION).doc(batchId).set({ batchId, date: batchDate, totalRows: total, imported, skipped, fileName: document.getElementById('previewFileName').textContent }); } catch(e) {}
+    document.getElementById('importProgress').classList.add('hidden');
+    const r = document.getElementById('importResult'); r.classList.remove('hidden');
+    r.className = r.className.replace(/bg-\w+-\d+/g,''); r.classList.add(imported>0?'bg-green-50':'bg-yellow-50');
+    document.getElementById('importResultText').innerHTML = `匯入完成！新增 <strong>${formatNumber(imported)}</strong> 筆，跳過重複 <strong>${formatNumber(skipped)}</strong> 筆。`;
+    pendingImportData = [];
+    await loadAllData(); loadImportHistory();
+}
+
+async function loadImportHistory() {
+    try {
+        const snap = await db.collection(BATCH_COLLECTION).orderBy('date','desc').limit(10).get();
+        const el = document.getElementById('importHistory');
+        if (snap.empty) { el.innerHTML = '<p class="text-gray-400">尚無匯入紀錄</p>'; return; }
+        el.innerHTML = '<div class="space-y-2">'+snap.docs.map(doc=>{const d=doc.data();return `<div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg"><div><p class="text-sm font-medium">${d.fileName||'未知檔案'}</p><p class="text-xs text-gray-400">${d.date?new Date(d.date).toLocaleString('zh-TW'):'-'}</p></div><div class="text-right"><p class="text-sm">新增 ${formatNumber(d.imported)} 筆</p><p class="text-xs text-gray-400">跳過 ${formatNumber(d.skipped)} 筆</p></div></div>`;}).join('')+'</div>';
+    } catch(e) {}
+}
+
+// ============================
+// 資料載入（Firestore）
+// ============================
+async function loadAllData() {
+    const indicator = document.getElementById('loadingIndicator');
+    indicator.classList.remove('hidden');
+    document.getElementById('dataStatus').textContent = '載入中...';
+    try {
+        const snap = await db.collection(COLLECTION).get();
+        allData = []; snap.forEach(doc => { const d = doc.data(); allData.push(d); });
+        filteredData = [...allData];
+        document.getElementById('dataStatus').textContent = `已載入 ${formatNumber(allData.length)} 筆資料`;
+        if (allData.length > 0) { populateFilters(); renderDashboard(); renderProductAnalysis(); renderCustomerAnalysis(); renderDataManagement(); renderDataTable(); }
+        const tab = document.querySelector('.tab-btn.active')?.dataset.tab; if (tab) checkNoData(tab);
+    } catch(e) { console.error('載入失敗：',e); document.getElementById('dataStatus').textContent = '載入失敗'; }
+    finally { indicator.classList.add('hidden'); }
+}
+
+// ============================
+// 資料管理
+// ============================
+function renderDataManagement() {
+    const uo = new Set(allData.map(r=>r.orderId)), dates = allData.map(r=>new Date(r.orderDate)).filter(d=>!isNaN(d)), batches = new Set(allData.map(r=>r.importBatch));
+    document.getElementById('dbTotalRows').textContent = formatNumber(allData.length);
+    document.getElementById('dbUniqueOrders').textContent = formatNumber(uo.size);
+    document.getElementById('dbBatchCount').textContent = formatNumber(batches.size);
+    if (dates.length) document.getElementById('dbDateRange').textContent = new Date(Math.min(...dates)).toLocaleDateString('zh-TW')+' ~ '+new Date(Math.max(...dates)).toLocaleDateString('zh-TW');
+    const bs = document.getElementById('dataBatch'); bs.innerHTML = '<option value="all">全部批次</option>';
+    [...batches].sort().reverse().forEach(b => { bs.innerHTML += `<option value="${b}">${b}</option>`; });
+}
+function renderDataTable() {
+    const search = document.getElementById('dataSearch').value.toLowerCase(), batch = document.getElementById('dataBatch').value;
+    let filtered = allData;
+    if (search) filtered = filtered.filter(r => r.orderId.toLowerCase().includes(search)||r.productName.toLowerCase().includes(search)||(r.memberName&&r.memberName.toLowerCase().includes(search)));
+    if (batch !== 'all') filtered = filtered.filter(r => r.importBatch === batch);
+    const tp = Math.ceil(filtered.length/DATA_PAGE_SIZE); dataTablePage = Math.min(dataTablePage, Math.max(tp-1,0));
+    const start = dataTablePage*DATA_PAGE_SIZE, page = filtered.slice(start, start+DATA_PAGE_SIZE);
+    document.getElementById('tableDataBrowse').innerHTML = page.map(r=>{const date=r.orderDate?new Date(r.orderDate).toLocaleDateString('zh-TW'):'-';return `<tr class="border-b hover:bg-gray-50"><td class="px-3 py-2 font-mono text-xs">${r.orderId}</td><td class="px-3 py-2 text-xs">${date}</td><td class="px-3 py-2 text-xs">${r.memberName||'-'}</td><td class="px-3 py-2">${r.productName}</td><td class="px-3 py-2 text-right">${r.quantity}</td><td class="px-3 py-2 text-right">${formatCurrency(r.subtotal)}</td><td class="px-3 py-2"><span class="text-xs px-2 py-0.5 rounded-full bg-gray-100">${r.orderStatus}</span></td><td class="px-3 py-2 text-xs text-gray-400">${r.importBatch||''}</td></tr>`;}).join('');
+    document.getElementById('dataTableInfo').textContent = filtered.length>0 ? `顯示 ${start+1}-${Math.min(start+DATA_PAGE_SIZE,filtered.length)} / 共 ${formatNumber(filtered.length)} 筆` : '顯示 0 筆';
+    document.getElementById('btnDataPrev').disabled = dataTablePage===0;
+    document.getElementById('btnDataNext').disabled = dataTablePage>=tp-1;
+}
+function filterDataTable() { dataTablePage=0; renderDataTable(); }
+function dataTablePrev() { if(dataTablePage>0){dataTablePage--;renderDataTable();} }
+function dataTableNext() { dataTablePage++; renderDataTable(); }
+
+// ============================
+// 白名單管理
+// ============================
+async function loadWhitelist() {
+    try {
+        const snap = await db.collection(WHITELIST_COLLECTION).get();
+        const el = document.getElementById('whitelistTable');
+        if (snap.empty) { el.innerHTML = '<p class="text-gray-400">尚無白名單資料</p>'; return; }
+        let html = '<table class="w-full text-sm"><thead class="bg-gray-50"><tr><th class="text-left px-3 py-2">Email</th><th class="text-left px-3 py-2">角色</th><th class="text-left px-3 py-2">新增者</th><th class="px-3 py-2">操作</th></tr></thead><tbody>';
+        snap.forEach(doc => {
+            const d = doc.data();
+            html += `<tr class="border-b"><td class="px-3 py-2">${d.email}</td><td class="px-3 py-2"><span class="px-2 py-0.5 rounded text-xs ${d.role==='admin'?'bg-yellow-100 text-yellow-800':'bg-gray-100 text-gray-600'}">${d.role==='admin'?'管理員':'檢視者'}</span></td><td class="px-3 py-2 text-gray-400 text-xs">${d.addedBy||'-'}</td><td class="px-3 py-2 text-center">${d.email!==currentUser.email?`<button onclick="removeWhitelist('${d.email}')" class="text-xs text-red-500 hover:underline">移除</button>`:'<span class="text-xs text-gray-400">本人</span>'}</td></tr>`;
+        });
+        html += '</tbody></table>';
+        el.innerHTML = html;
+    } catch(e) { document.getElementById('whitelistTable').innerHTML = '<p class="text-red-400">載入失敗</p>'; }
+}
+async function addWhitelist() {
+    const email = document.getElementById('newWhitelistEmail').value.trim();
+    const role = document.getElementById('newWhitelistRole').value;
+    if (!email || !email.includes('@')) { alert('請輸入有效的 Email'); return; }
+    try {
+        await db.collection(WHITELIST_COLLECTION).doc(email).set({
+            email, role, addedAt: firebase.firestore.FieldValue.serverTimestamp(), addedBy: currentUser.email
+        });
+        document.getElementById('newWhitelistEmail').value = '';
+        loadWhitelist();
+    } catch(e) { alert('新增失敗：'+e.message); }
+}
+async function removeWhitelist(email) {
+    if (!confirm(`確定要移除 ${email} 的存取權限？`)) return;
+    try { await db.collection(WHITELIST_COLLECTION).doc(email).delete(); loadWhitelist(); } catch(e) { alert('移除失敗：'+e.message); }
+}
+
+// ============================
+// 初始化
+// ============================
+function initApp() { setupDragDrop(); loadAllData(); loadImportHistory(); }
+</script>
+</body>
+</html>
