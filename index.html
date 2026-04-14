@@ -711,43 +711,31 @@ async function startImport() {
     document.getElementById('importProgress').classList.remove('hidden');
     document.getElementById('importResult').classList.add('hidden');
     const batchDate = new Date().toISOString(), batchId = batchDate.split('T')[0]+'_'+Date.now();
-    let imported = 0, skipped = 0; const total = pendingImportData.length;
-    // 取得已存在 key 做去重
-    const existingKeys = new Set();
-    try {
-        const snap = await db.collection(COLLECTION).select('orderId','productId').get();
-        snap.forEach(doc => { const d = doc.data(); existingKeys.add(d.orderId+'_'+d.productId); });
-    } catch(e) { console.warn('去重讀取失敗：', e); }
-    // 分批寫入（每批 400 筆，加延遲避免 quota）
+    let imported = 0; const total = pendingImportData.length;
+    // 用 doc ID = orderId_productId 做天然去重（set 會覆蓋，不需先讀取）
     const BATCH_SIZE = 400;
     for (let i = 0; i < total; i += BATCH_SIZE) {
         const batch = db.batch();
         const chunk = pendingImportData.slice(i, i + BATCH_SIZE);
-        let batchHasData = false;
         chunk.forEach(row => {
-            const key = row.orderId + '_' + row.productId;
-            if (existingKeys.has(key)) { skipped++; return; }
-            existingKeys.add(key);
-            const ref = db.collection(COLLECTION).doc();
+            const docId = row.orderId + '_' + row.productId;
+            const ref = db.collection(COLLECTION).doc(docId);
             batch.set(ref, { ...row, importBatch: batchId, createdAt: firebase.firestore.FieldValue.serverTimestamp() });
-            imported++; batchHasData = true;
+            imported++;
         });
-        if (batchHasData) {
-            try { await batch.commit(); } catch(e) { console.error('批次寫入失敗：', e); }
-        }
+        try { await batch.commit(); } catch(e) { console.error('批次寫入失敗：', e); }
         const progress = Math.min(((i+chunk.length)/total)*100, 100);
         document.getElementById('importBar').style.width = progress+'%';
         document.getElementById('importPercent').textContent = Math.round(progress)+'%';
         document.getElementById('importDetail').textContent = `已處理 ${Math.min(i+chunk.length,total)} / ${total} 筆`;
-        // 延遲 300ms 避免觸發 Firestore quota
-        if (batchHasData) await sleep(300);
+        await sleep(200);
     }
     // 記錄批次
-    try { await db.collection(BATCH_COLLECTION).doc(batchId).set({ batchId, date: batchDate, totalRows: total, imported, skipped, fileName: document.getElementById('previewFileName').textContent }); } catch(e) {}
+    try { await db.collection(BATCH_COLLECTION).doc(batchId).set({ batchId, date: batchDate, totalRows: total, imported, skipped: 0, fileName: document.getElementById('previewFileName').textContent }); } catch(e) {}
     document.getElementById('importProgress').classList.add('hidden');
     const r = document.getElementById('importResult'); r.classList.remove('hidden');
     r.className = r.className.replace(/bg-\w+-\d+/g,''); r.classList.add(imported>0?'bg-green-50':'bg-yellow-50');
-    document.getElementById('importResultText').innerHTML = `匯入完成！新增 <strong>${formatNumber(imported)}</strong> 筆，跳過重複 <strong>${formatNumber(skipped)}</strong> 筆。`;
+    document.getElementById('importResultText').innerHTML = `匯入完成！已處理 <strong>${formatNumber(imported)}</strong> 筆資料（重複資料會自動覆蓋）。`;
     pendingImportData = [];
     await loadAllData(); loadImportHistory();
 }
