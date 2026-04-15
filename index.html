@@ -693,10 +693,9 @@ function withTimeout(promise, ms) {
 // ============================
 function renderDashboard() {
     const data = filteredData; if (!data.length) return;
-    const orderMap = new Map(); let totalQty = 0;
-    data.forEach(row => { if (!orderMap.has(row.orderId)) orderMap.set(row.orderId, row.orderTotal); totalQty += row.quantity; });
-    const revenue = [...orderMap.values()].reduce((a, b) => a + b, 0);
-    const orderCount = orderMap.size, aov = orderCount > 0 ? revenue / orderCount : 0;
+    const orderSet = new Set(); let totalQty = 0, revenue = 0;
+    data.forEach(row => { orderSet.add(row.orderId); totalQty += row.quantity; revenue += row.subtotal; });
+    const orderCount = orderSet.size, aov = orderCount > 0 ? revenue / orderCount : 0;
     document.getElementById('kpiRevenue').textContent = formatCurrency(revenue);
     document.getElementById('kpiOrders').textContent = formatNumber(orderCount);
     document.getElementById('kpiAOV').textContent = formatCurrency(aov);
@@ -705,11 +704,11 @@ function renderDashboard() {
     const md = new Map();
     data.forEach(row => {
         const d = new Date(row.orderDate), key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
-        if (!md.has(key)) md.set(key, { rev: new Map(), ord: new Set() });
-        const m = md.get(key); if (!m.rev.has(row.orderId)) m.rev.set(row.orderId, row.orderTotal); m.ord.add(row.orderId);
+        if (!md.has(key)) md.set(key, { rev: 0, ord: new Set() });
+        const m = md.get(key); m.rev += row.subtotal; m.ord.add(row.orderId);
     });
     const sm = [...md.keys()].sort();
-    const mRev = sm.map(k => [...md.get(k).rev.values()].reduce((a,b)=>a+b,0));
+    const mRev = sm.map(k => md.get(k).rev);
     const mOrd = sm.map(k => md.get(k).ord.size);
     const mAov = sm.map((k,i) => mOrd[i]>0 ? mRev[i]/mOrd[i] : 0);
     renderChart('chartRevenueTrend','line',{labels:sm,datasets:[{label:'營業額',data:mRev,borderColor:'#C3F000',backgroundColor:'rgba(195,240,0,0.1)',fill:true,tension:0.3,pointRadius:4}]},{scales:{y:{beginAtZero:true,ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}}}});
@@ -726,15 +725,14 @@ function renderDashboard() {
     const qd = new Map(); // { year -> { Q1:rev, Q2:rev, ... } }
     data.forEach(row => {
         const d = new Date(row.orderDate), yr = d.getFullYear(), q = 'Q' + (Math.floor(d.getMonth()/3)+1);
-        if (!qd.has(yr)) qd.set(yr, { Q1:new Map(), Q2:new Map(), Q3:new Map(), Q4:new Map() });
-        const qm = qd.get(yr)[q];
-        if (!qm.has(row.orderId)) qm.set(row.orderId, row.orderTotal);
+        if (!qd.has(yr)) qd.set(yr, { Q1:0, Q2:0, Q3:0, Q4:0 });
+        qd.get(yr)[q] += row.subtotal;
     });
     const qYears = [...qd.keys()].sort();
     const qColors = ['#C3F000','#FFAA00','#4ECDC4','#FF6B6B','#45B7D1','#96CEB4'];
     const qDatasets = qYears.map((yr, i) => ({
         label: yr + ' 年', borderRadius: 4,
-        data: ['Q1','Q2','Q3','Q4'].map(q => [...qd.get(yr)[q].values()].reduce((a,b)=>a+b,0)),
+        data: ['Q1','Q2','Q3','Q4'].map(q => qd.get(yr)[q]),
         backgroundColor: qColors[i % qColors.length] + 'B3'
     }));
     renderChart('chartQuarterCompare','bar',{labels:['Q1 (1-3月)','Q2 (4-6月)','Q3 (7-9月)','Q4 (10-12月)'],datasets:qDatasets},{scales:{y:{beginAtZero:true,ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}}}});
@@ -745,18 +743,13 @@ function renderDashboard() {
         const d = new Date(row.orderDate), yr = d.getFullYear(), mo = d.getMonth()+1;
         if (!yoyData.has(yr)) yoyData.set(yr, new Map());
         const ym = yoyData.get(yr);
-        if (!ym.has(mo)) ym.set(mo, new Map());
-        const om = ym.get(mo);
-        if (!om.has(row.orderId)) om.set(row.orderId, row.orderTotal);
+        ym.set(mo, (ym.get(mo) || 0) + row.subtotal);
     });
     const yoyYears = [...yoyData.keys()].sort();
     const yoyDatasets = yoyYears.map((yr, i) => ({
         label: yr + ' 年', borderColor: qColors[i % qColors.length],
         backgroundColor: qColors[i % qColors.length] + '33', fill: false,
-        data: Array.from({length:12},(_,m) => {
-            const om = yoyData.get(yr).get(m+1);
-            return om ? [...om.values()].reduce((a,b)=>a+b,0) : 0;
-        }),
+        data: Array.from({length:12},(_,m) => yoyData.get(yr).get(m+1) || 0),
         tension: 0.3, pointRadius: 4
     }));
     renderChart('chartYoY','line',{labels:['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],datasets:yoyDatasets},{scales:{y:{beginAtZero:true,ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}}}});
@@ -797,15 +790,16 @@ function renderCustomerAnalysis() {
     const cm = new Map();
     data.forEach(row => {
         const key = (row.memberName || '未知') + '_' + (row.phone || '');
-        if (!cm.has(key)) cm.set(key, { name: row.memberName || '未知', phone: row.phone || '', orders: new Map(), lastDate: null, firstDate: null });
+        if (!cm.has(key)) cm.set(key, { name: row.memberName || '未知', phone: row.phone || '', orders: new Set(), spend: 0, lastDate: null, firstDate: null });
         const c = cm.get(key);
-        if (!c.orders.has(row.orderId)) c.orders.set(row.orderId, row.orderTotal);
+        c.orders.add(row.orderId);
+        c.spend += row.subtotal;
         const d = new Date(row.orderDate);
         if (!c.lastDate || d > c.lastDate) c.lastDate = d;
         if (!c.firstDate || d < c.firstDate) c.firstDate = d;
     });
     const customers = [...cm.values()].map(c => {
-        const spend = [...c.orders.values()].reduce((a,b)=>a+b,0);
+        const spend = c.spend;
         const freq = c.orders.size, aov = freq>0?spend/freq:0;
         const days = c.lastDate&&c.firstDate ? Math.max((c.lastDate-c.firstDate)/(1000*60*60*24),1) : 1;
         const yFreq = freq>1 ? (freq/days)*365 : freq;
@@ -886,24 +880,26 @@ function renderOverview() {
     if (!data.length) { document.getElementById('overviewBody').innerHTML = '<tr><td colspan="9" class="text-center py-8 text-gray-400">尚無資料</td></tr>'; return; }
 
     // 聚合年度 & 月度資料
-    const yearly = new Map(); // year -> { orders: Map, qty, customers: Set }
-    const monthly = new Map(); // year -> { month -> { orders: Map, qty, customers: Set } }
+    const yearly = new Map(); // year -> { orders: Set, rev, qty, customers: Map }
+    const monthly = new Map(); // year -> { month -> { orders: Set, rev, qty, customers: Map } }
     data.forEach(row => {
         const d = new Date(row.orderDate), yr = d.getFullYear(), mo = d.getMonth() + 1;
         const cKey = (row.memberName || '未知') + '_' + (row.phone || '');
         // 年度
-        if (!yearly.has(yr)) yearly.set(yr, { orders: new Map(), qty: 0, customers: new Map() });
+        if (!yearly.has(yr)) yearly.set(yr, { orders: new Set(), rev: 0, qty: 0, customers: new Map() });
         const y = yearly.get(yr);
-        if (!y.orders.has(row.orderId)) y.orders.set(row.orderId, row.orderTotal);
+        y.orders.add(row.orderId);
+        y.rev += row.subtotal;
         y.qty += row.quantity;
         if (!y.customers.has(cKey)) y.customers.set(cKey, new Set());
         y.customers.get(cKey).add(row.orderId);
         // 月度
         if (!monthly.has(yr)) monthly.set(yr, new Map());
         const ym = monthly.get(yr);
-        if (!ym.has(mo)) ym.set(mo, { orders: new Map(), qty: 0, customers: new Map() });
+        if (!ym.has(mo)) ym.set(mo, { orders: new Set(), rev: 0, qty: 0, customers: new Map() });
         const m = ym.get(mo);
-        if (!m.orders.has(row.orderId)) m.orders.set(row.orderId, row.orderTotal);
+        m.orders.add(row.orderId);
+        m.rev += row.subtotal;
         m.qty += row.quantity;
         if (!m.customers.has(cKey)) m.customers.set(cKey, new Set());
         m.customers.get(cKey).add(row.orderId);
@@ -911,7 +907,7 @@ function renderOverview() {
 
     // 計算指標
     function calcMetrics(d) {
-        const rev = [...d.orders.values()].reduce((a, b) => a + b, 0);
+        const rev = d.rev;
         const ordCount = d.orders.size;
         const aov = ordCount > 0 ? rev / ordCount : 0;
         const custCount = d.customers.size;
