@@ -903,7 +903,8 @@ async function removeWhitelist(email) {
 // ============================
 // MCP API 同步
 // ============================
-const MCP_API_URL = 'https://www.dlsveg.com.tw/mcp/index.php';
+// 透過 Vercel proxy 解決 CORS（原始 API: https://www.dlsveg.com.tw/mcp/index.php）
+const MCP_API_URL = 'https://mcp-proxy-kappa.vercel.app/api/mcp';
 const SYNC_BATCH_COLLECTION = 'import-batches';
 
 // 儲存/讀取 API Key
