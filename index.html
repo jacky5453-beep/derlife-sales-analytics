@@ -109,19 +109,21 @@
         <div id="filterBar" class="bg-white border-b">
             <div class="max-w-7xl mx-auto px-4 py-3 flex flex-wrap items-center gap-3">
                 <label class="text-sm font-medium text-gray-600">篩選條件：</label>
-                <select id="filterYear" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
-                    <option value="all">全部年度</option>
-                </select>
-                <select id="filterMonth" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
-                    <option value="all">全部月份</option>
-                    <option value="1">1 月</option><option value="2">2 月</option><option value="3">3 月</option>
-                    <option value="4">4 月</option><option value="5">5 月</option><option value="6">6 月</option>
-                    <option value="7">7 月</option><option value="8">8 月</option><option value="9">9 月</option>
-                    <option value="10">10 月</option><option value="11">11 月</option><option value="12">12 月</option>
-                </select>
+                <label class="text-xs text-gray-500">起始日期</label>
+                <input type="date" id="filterDateFrom" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
+                <label class="text-xs text-gray-500">結束日期</label>
+                <input type="date" id="filterDateTo" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
                 <select id="filterStatus" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
                     <option value="all">全部狀態</option>
                 </select>
+                <!-- 快捷按鈕 -->
+                <div class="flex gap-1">
+                    <button onclick="setQuickRange('thisMonth')" class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-brand hover:text-brand-dark transition">本月</button>
+                    <button onclick="setQuickRange('lastMonth')" class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-brand hover:text-brand-dark transition">上月</button>
+                    <button onclick="setQuickRange('last7')" class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-brand hover:text-brand-dark transition">近7天</button>
+                    <button onclick="setQuickRange('last30')" class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-brand hover:text-brand-dark transition">近30天</button>
+                    <button onclick="setQuickRange('thisYear')" class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-brand hover:text-brand-dark transition">今年</button>
+                </div>
                 <button onclick="resetFilters()" class="text-xs text-gray-500 hover:text-brand-dark underline">重置篩選</button>
             </div>
         </div>
@@ -560,31 +562,67 @@ function checkNoData(tabName) {
 // 篩選器
 // ============================
 function applyFilters() {
-    const year = document.getElementById('filterYear').value;
-    const month = document.getElementById('filterMonth').value;
+    const dateFrom = document.getElementById('filterDateFrom').value;
+    const dateTo = document.getElementById('filterDateTo').value;
     const status = document.getElementById('filterStatus').value;
     filteredData = allData.filter(row => {
-        const d = new Date(row.orderDate);
-        if (year !== 'all' && d.getFullYear() !== parseInt(year)) return false;
-        if (month !== 'all' && (d.getMonth() + 1) !== parseInt(month)) return false;
+        const d = row.orderDate ? row.orderDate.slice(0, 10) : '';
+        if (dateFrom && d < dateFrom) return false;
+        if (dateTo && d > dateTo) return false;
         if (status !== 'all' && row.orderStatus !== status) return false;
         return true;
     });
     renderDashboard(); renderProductAnalysis(); renderCustomerAnalysis();
 }
 function resetFilters() {
-    document.getElementById('filterYear').value = 'all';
-    document.getElementById('filterMonth').value = 'all';
+    document.getElementById('filterDateFrom').value = '';
+    document.getElementById('filterDateTo').value = '';
     document.getElementById('filterStatus').value = 'all';
     applyFilters();
 }
+// 快捷日期範圍
+function setQuickRange(range) {
+    const today = new Date();
+    let from, to;
+    const fmt = d => d.toISOString().slice(0, 10);
+    switch(range) {
+        case 'thisMonth':
+            from = new Date(today.getFullYear(), today.getMonth(), 1);
+            to = today;
+            break;
+        case 'lastMonth':
+            from = new Date(today.getFullYear(), today.getMonth() - 1, 1);
+            to = new Date(today.getFullYear(), today.getMonth(), 0);
+            break;
+        case 'last7':
+            from = new Date(today); from.setDate(today.getDate() - 6);
+            to = today;
+            break;
+        case 'last30':
+            from = new Date(today); from.setDate(today.getDate() - 29);
+            to = today;
+            break;
+        case 'thisYear':
+            from = new Date(today.getFullYear(), 0, 1);
+            to = today;
+            break;
+    }
+    document.getElementById('filterDateFrom').value = fmt(from);
+    document.getElementById('filterDateTo').value = fmt(to);
+    applyFilters();
+}
 function populateFilters() {
-    const years = new Set(), statuses = new Set();
-    allData.forEach(row => { years.add(new Date(row.orderDate).getFullYear()); if (row.orderStatus) statuses.add(row.orderStatus); });
-    const ys = document.getElementById('filterYear'); ys.innerHTML = '<option value="all">全部年度</option>';
-    [...years].sort().forEach(y => { ys.innerHTML += `<option value="${y}">${y} 年</option>`; });
+    const statuses = new Set();
+    allData.forEach(row => { if (row.orderStatus) statuses.add(row.orderStatus); });
     const ss = document.getElementById('filterStatus'); ss.innerHTML = '<option value="all">全部狀態</option>';
     [...statuses].sort().forEach(s => { ss.innerHTML += `<option value="${s}">${s}</option>`; });
+    // 自動設定日期範圍為資料的最小/最大日期
+    const dates = allData.map(r => r.orderDate ? r.orderDate.slice(0, 10) : '').filter(d => d);
+    if (dates.length) {
+        dates.sort();
+        document.getElementById('filterDateFrom').value = dates[0];
+        document.getElementById('filterDateTo').value = dates[dates.length - 1];
+    }
 }
 
 // ============================
