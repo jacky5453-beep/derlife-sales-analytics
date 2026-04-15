@@ -171,6 +171,17 @@
                         <div class="chart-container" style="height:300px;"><canvas id="chartAOVTrend"></canvas></div>
                     </div>
                 </div>
+                <!-- 時段分析：季度比較 + YoY -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">季度營業額比較</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartQuarterCompare"></canvas></div>
+                    </div>
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">年同期對比（YoY）</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartYoY"></canvas></div>
+                    </div>
+                </div>
             </section>
 
             <!-- 商品分析 -->
@@ -254,6 +265,17 @@
                     <div class="bg-white rounded-xl p-5 shadow-sm border">
                         <h3 class="text-sm font-semibold text-gray-700 mb-3">顧客購買金額分佈</h3>
                         <div class="chart-container" style="height:300px;"><canvas id="chartSpendDist"></canvas></div>
+                    </div>
+                </div>
+                <!-- 新客 vs 回購客追蹤 -->
+                <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mt-6">
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">每月新客 vs 回購客</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartNewVsReturn"></canvas></div>
+                    </div>
+                    <div class="bg-white rounded-xl p-5 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">累計顧客成長曲線</h3>
+                        <div class="chart-container" style="height:300px;"><canvas id="chartCustomerGrowth"></canvas></div>
                     </div>
                 </div>
             </section>
@@ -669,6 +691,45 @@ function renderDashboard() {
     const colors = ['#C3F000','#FFAA00','#4ECDC4','#FF6B6B','#45B7D1','#96CEB4','#DDA0DD','#778899'];
     renderChart('chartOrderStatus','doughnut',{labels:sl,datasets:[{data:sv,backgroundColor:colors.slice(0,sl.length)}]},{plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}});
     renderChart('chartAOVTrend','line',{labels:sm,datasets:[{label:'客單價',data:mAov,borderColor:'#FFAA00',backgroundColor:'rgba(255,170,0,0.1)',fill:true,tension:0.3,pointRadius:4}]},{scales:{y:{beginAtZero:false,ticks:{callback:v=>'$'+Math.round(v)}}}});
+
+    // 季度營業額比較（每年一組 dataset，X 軸 Q1~Q4）
+    const qd = new Map(); // { year -> { Q1:rev, Q2:rev, ... } }
+    data.forEach(row => {
+        const d = new Date(row.orderDate), yr = d.getFullYear(), q = 'Q' + (Math.floor(d.getMonth()/3)+1);
+        if (!qd.has(yr)) qd.set(yr, { Q1:new Map(), Q2:new Map(), Q3:new Map(), Q4:new Map() });
+        const qm = qd.get(yr)[q];
+        if (!qm.has(row.orderId)) qm.set(row.orderId, row.orderTotal);
+    });
+    const qYears = [...qd.keys()].sort();
+    const qColors = ['#C3F000','#FFAA00','#4ECDC4','#FF6B6B','#45B7D1','#96CEB4'];
+    const qDatasets = qYears.map((yr, i) => ({
+        label: yr + ' 年', borderRadius: 4,
+        data: ['Q1','Q2','Q3','Q4'].map(q => [...qd.get(yr)[q].values()].reduce((a,b)=>a+b,0)),
+        backgroundColor: qColors[i % qColors.length] + 'B3'
+    }));
+    renderChart('chartQuarterCompare','bar',{labels:['Q1 (1-3月)','Q2 (4-6月)','Q3 (7-9月)','Q4 (10-12月)'],datasets:qDatasets},{scales:{y:{beginAtZero:true,ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}}}});
+
+    // YoY 年同期對比（X 軸 1~12 月，每年一組 dataset）
+    const yoyData = new Map(); // { year -> { month -> revenue } }
+    data.forEach(row => {
+        const d = new Date(row.orderDate), yr = d.getFullYear(), mo = d.getMonth()+1;
+        if (!yoyData.has(yr)) yoyData.set(yr, new Map());
+        const ym = yoyData.get(yr);
+        if (!ym.has(mo)) ym.set(mo, new Map());
+        const om = ym.get(mo);
+        if (!om.has(row.orderId)) om.set(row.orderId, row.orderTotal);
+    });
+    const yoyYears = [...yoyData.keys()].sort();
+    const yoyDatasets = yoyYears.map((yr, i) => ({
+        label: yr + ' 年', borderColor: qColors[i % qColors.length],
+        backgroundColor: qColors[i % qColors.length] + '33', fill: false,
+        data: Array.from({length:12},(_,m) => {
+            const om = yoyData.get(yr).get(m+1);
+            return om ? [...om.values()].reduce((a,b)=>a+b,0) : 0;
+        }),
+        tension: 0.3, pointRadius: 4
+    }));
+    renderChart('chartYoY','line',{labels:['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'],datasets:yoyDatasets},{scales:{y:{beginAtZero:true,ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}}}});
 }
 
 // ============================
@@ -743,6 +804,48 @@ function renderCustomerAnalysis() {
     const sb = [{label:'< $1K',min:0,max:1000},{label:'$1K-3K',min:1000,max:3000},{label:'$3K-5K',min:3000,max:5000},{label:'$5K-10K',min:5000,max:10000},{label:'$10K-20K',min:10000,max:20000},{label:'$20K-50K',min:20000,max:50000},{label:'$50K+',min:50000,max:Infinity}];
     const spv = sb.map(b=>customers.filter(c=>c.spend>=b.min&&c.spend<b.max).length);
     renderChart('chartSpendDist','bar',{labels:sb.map(b=>b.label),datasets:[{label:'顧客數',data:spv,backgroundColor:'rgba(255,170,0,0.7)',borderRadius:4}]},{scales:{y:{beginAtZero:true},x:{ticks:{font:{size:10}}}},plugins:{legend:{display:false}}});
+
+    // 每月新客 vs 回購客 + 累計顧客成長
+    const monthlyCustomers = new Map(); // { YYYY-MM -> Set of customer keys }
+    data.forEach(row => {
+        const d = new Date(row.orderDate);
+        const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        const cKey = (row.memberName || '未知') + '_' + (row.phone || '');
+        if (!monthlyCustomers.has(key)) monthlyCustomers.set(key, new Set());
+        monthlyCustomers.get(key).add(cKey);
+    });
+    const sortedMonths = [...monthlyCustomers.keys()].sort();
+    const seenCustomers = new Set(); // 追蹤已出現過的顧客
+    const newCounts = [], returnCounts = [], cumulativeCounts = [];
+    sortedMonths.forEach(month => {
+        let newC = 0, retC = 0;
+        monthlyCustomers.get(month).forEach(cKey => {
+            if (seenCustomers.has(cKey)) { retC++; } else { newC++; seenCustomers.add(cKey); }
+        });
+        newCounts.push(newC);
+        returnCounts.push(retC);
+        cumulativeCounts.push(seenCustomers.size);
+    });
+    // 堆疊柱狀圖：新客 vs 回購客
+    renderChart('chartNewVsReturn','bar',{
+        labels: sortedMonths,
+        datasets: [
+            { label:'新客', data:newCounts, backgroundColor:'rgba(195,240,0,0.8)', borderRadius:4 },
+            { label:'回購客', data:returnCounts, backgroundColor:'rgba(255,170,0,0.8)', borderRadius:4 }
+        ]
+    },{
+        scales:{ x:{stacked:true}, y:{stacked:true, beginAtZero:true} },
+        plugins:{ tooltip:{ callbacks:{ afterBody:function(ctx){ const i=ctx[0].dataIndex; const t=newCounts[i]+returnCounts[i]; const rr=t>0?(returnCounts[i]/t*100).toFixed(1):0; return '回購率：'+rr+'%'; }}}}
+    });
+    // 累計顧客成長曲線
+    renderChart('chartCustomerGrowth','line',{
+        labels: sortedMonths,
+        datasets: [{
+            label:'累計顧客數', data:cumulativeCounts,
+            borderColor:'#4ECDC4', backgroundColor:'rgba(78,205,196,0.1)',
+            fill:true, tension:0.3, pointRadius:4
+        }]
+    },{scales:{y:{beginAtZero:true}}});
 }
 
 // ============================
