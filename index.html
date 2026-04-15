@@ -291,9 +291,66 @@
                         </div>
                         <div id="importResult" class="hidden mt-4 p-4 rounded-lg"><p class="text-sm font-medium" id="importResultText"></p></div>
                     </div>
-                    <div class="bg-white rounded-xl p-6 shadow-sm border">
+                    <div class="bg-white rounded-xl p-6 shadow-sm border mb-6">
                         <h3 class="text-sm font-semibold text-gray-700 mb-3">匯入歷史紀錄</h3>
                         <div id="importHistory" class="text-sm text-gray-500">尚無匯入紀錄</div>
+                    </div>
+
+                    <!-- API 同步區塊 -->
+                    <div class="bg-white rounded-xl p-6 shadow-sm border mb-6" style="border-left: 4px solid #C3F000;">
+                        <div class="flex items-center gap-2 mb-4">
+                            <svg class="h-5 w-5 text-brand-dark" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                            <h3 class="text-lg font-semibold text-gray-800">從官網 API 同步訂單</h3>
+                        </div>
+                        <p class="text-sm text-gray-500 mb-4">直接從得來素官網 MCP API 撈取訂單資料，免手動匯出 Excel。</p>
+
+                        <!-- API Key 設定 -->
+                        <div id="apiKeySetup" class="mb-4">
+                            <label class="text-sm font-medium text-gray-600 block mb-1">MCP API Key</label>
+                            <div class="flex gap-2">
+                                <input type="password" id="apiKeyInput" placeholder="輸入你的 MCP API Key..." class="flex-1 border rounded-lg px-3 py-2 text-sm font-mono focus:ring-2 focus:ring-brand outline-none">
+                                <button onclick="saveApiKey()" class="px-4 py-2 bg-brand-dark text-brand text-sm font-semibold rounded-lg hover:opacity-90">儲存</button>
+                            </div>
+                            <p class="text-xs text-gray-400 mt-1">API Key 會儲存在瀏覽器本地，不會上傳。<span id="apiKeyStatus" class="ml-2 text-green-600 hidden">已儲存</span></p>
+                        </div>
+
+                        <!-- 同步控制 -->
+                        <div id="syncControls">
+                            <div class="flex flex-wrap items-end gap-3 mb-4">
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">起始日期</label>
+                                    <input type="date" id="syncDateFrom" class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand outline-none">
+                                </div>
+                                <div>
+                                    <label class="text-xs text-gray-500 block mb-1">結束日期</label>
+                                    <input type="date" id="syncDateTo" class="border rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-brand outline-none">
+                                </div>
+                                <button onclick="startApiSync()" id="btnStartSync" class="px-5 py-2 bg-brand-dark text-brand text-sm font-semibold rounded-lg hover:opacity-90 flex items-center gap-2">
+                                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" /></svg>
+                                    開始同步
+                                </button>
+                            </div>
+                            <p class="text-xs text-gray-400" id="lastSyncInfo">尚未同步過</p>
+                        </div>
+
+                        <!-- 同步進度 -->
+                        <div id="syncProgress" class="hidden mt-4">
+                            <div class="flex items-center justify-between mb-2">
+                                <span class="text-sm text-gray-600" id="syncStatusText">連線中...</span>
+                                <span class="text-sm font-medium" id="syncPercent">0%</span>
+                            </div>
+                            <div class="w-full bg-gray-200 rounded-full h-2.5"><div class="progress-bar bg-brand h-2.5 rounded-full" id="syncBar" style="width:0%"></div></div>
+                            <p class="text-xs text-gray-400 mt-2" id="syncDetail"></p>
+                        </div>
+
+                        <!-- 同步結果 -->
+                        <div id="syncResult" class="hidden mt-4 p-4 rounded-lg"><p class="text-sm font-medium" id="syncResultText"></p></div>
+                    </div>
+
+                    <!-- 同步紀錄 -->
+                    <div class="bg-white rounded-xl p-6 shadow-sm border">
+                        <h3 class="text-sm font-semibold text-gray-700 mb-3">API 同步紀錄</h3>
+                        <div id="syncHistory" class="text-sm text-gray-500">尚無同步紀錄</div>
                     </div>
                 </div>
             </section>
@@ -844,9 +901,272 @@ async function removeWhitelist(email) {
 }
 
 // ============================
+// MCP API 同步
+// ============================
+const MCP_API_URL = 'https://www.dlsveg.com.tw/mcp/index.php';
+const SYNC_BATCH_COLLECTION = 'import-batches';
+
+// 儲存/讀取 API Key
+function saveApiKey() {
+    const key = document.getElementById('apiKeyInput').value.trim();
+    if (!key) { alert('請輸入 API Key'); return; }
+    localStorage.setItem('mcpApiKey', key);
+    document.getElementById('apiKeyStatus').classList.remove('hidden');
+    setTimeout(() => document.getElementById('apiKeyStatus').classList.add('hidden'), 3000);
+    initSyncUI();
+}
+
+function getApiKey() { return localStorage.getItem('mcpApiKey') || ''; }
+
+// 初始化同步 UI（日期預設值、上次同步時間）
+function initSyncUI() {
+    const key = getApiKey();
+    if (key) {
+        document.getElementById('apiKeyInput').value = key;
+        document.getElementById('apiKeyStatus').classList.remove('hidden');
+    }
+    // 設定日期預設值
+    const today = new Date().toISOString().split('T')[0];
+    document.getElementById('syncDateTo').value = today;
+    const lastSync = localStorage.getItem('lastSyncTime');
+    if (lastSync) {
+        // 預設起始日 = 上次同步日期
+        const lastDate = new Date(lastSync);
+        document.getElementById('syncDateFrom').value = lastDate.toISOString().split('T')[0];
+        document.getElementById('lastSyncInfo').textContent = '上次同步：' + lastDate.toLocaleString('zh-TW');
+    } else {
+        // 首次同步，預設撈最近 30 天
+        const d = new Date(); d.setDate(d.getDate() - 30);
+        document.getElementById('syncDateFrom').value = d.toISOString().split('T')[0];
+    }
+    loadSyncHistory();
+}
+
+// 通用 MCP API 呼叫
+async function callMcpApi(toolName, args) {
+    const apiKey = getApiKey();
+    if (!apiKey) throw new Error('尚未設定 API Key');
+    const body = {
+        jsonrpc: '2.0',
+        id: Date.now(),
+        method: 'tools/call',
+        params: { name: toolName, arguments: args }
+    };
+    const resp = await fetch(MCP_API_URL, {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+            'Authorization': 'Bearer ' + apiKey
+        },
+        body: JSON.stringify(body)
+    });
+    if (!resp.ok) throw new Error('HTTP ' + resp.status + ': ' + resp.statusText);
+    const json = await resp.json();
+    if (json.error) throw new Error(json.error.message || JSON.stringify(json.error));
+    if (json.result && json.result.isError) {
+        const errText = json.result.content?.[0]?.text || '未知錯誤';
+        throw new Error(errText);
+    }
+    // 解析 content[0].text 為 JSON
+    const text = json.result?.content?.[0]?.text;
+    return text ? JSON.parse(text) : json.result;
+}
+
+// 將 API 訂單資料對應到 Firestore 欄位
+function mapApiOrderToFirestore(order, item) {
+    return {
+        orderId: String(order.orderno || ''),
+        orderDate: order.order_time ? new Date(order.order_time).toISOString() : null,
+        orderStatus: order.status_name || '',
+        memberId: order.member_account || '',
+        memberName: order.buyer_name || '',
+        phone: String(order.buyer_mobile || ''),
+        productId: String(item.item_number || ''),
+        productName: item.product_name || '',
+        quantity: parseInt(item.quantity) || 0,
+        unitPrice: parseInt(item.price) || 0,
+        subtotal: parseInt(item.subtotal) || 0,
+        orderTotal: parseInt(order.paid_amount) || 0,
+        shippingFee: parseInt(order.portage) || 0,
+        bonusEarned: parseInt(order.total_bonus) || 0,
+        bonusUsed: parseInt(order.use_bonus) || 0,
+    };
+}
+
+// 開始 API 同步
+async function startApiSync() {
+    const apiKey = getApiKey();
+    if (!apiKey) { alert('請先設定 MCP API Key'); return; }
+    const dateFrom = document.getElementById('syncDateFrom').value;
+    const dateTo = document.getElementById('syncDateTo').value;
+    if (!dateFrom || !dateTo) { alert('請選擇日期範圍'); return; }
+    if (dateFrom > dateTo) { alert('起始日期不能大於結束日期'); return; }
+
+    // 顯示進度
+    document.getElementById('btnStartSync').disabled = true;
+    document.getElementById('syncProgress').classList.remove('hidden');
+    document.getElementById('syncResult').classList.add('hidden');
+    updateSyncProgress(0, '連線到官網 API...');
+
+    const batchId = 'api-sync_' + dateTo + '_' + Date.now();
+    let allOrders = [], page = 1, totalPages = 1;
+
+    try {
+        // 分頁撈取訂單
+        updateSyncProgress(5, '正在撈取訂單...');
+        while (page <= totalPages) {
+            const result = await callMcpApi('list_orders', {
+                page: page,
+                date_from: dateFrom,
+                date_to: dateTo,
+                include_items: true
+            });
+            totalPages = result.total_pages || 1;
+            const orders = result.data || [];
+            allOrders = allOrders.concat(orders);
+            const fetchProgress = Math.min(30, (page / totalPages) * 30);
+            updateSyncProgress(fetchProgress, `撈取中... 第 ${page}/${totalPages} 頁，已取得 ${allOrders.length} 筆訂單`);
+            page++;
+            if (page <= totalPages) await sleep(200); // 避免 rate limit
+        }
+
+        if (allOrders.length === 0) {
+            updateSyncProgress(100, '完成');
+            showSyncResult('info', `此日期範圍（${dateFrom} ~ ${dateTo}）沒有訂單資料。`);
+            document.getElementById('btnStartSync').disabled = false;
+            return;
+        }
+
+        // 展開訂單明細（一筆訂單可能有多個商品）
+        updateSyncProgress(35, '整理訂單明細...');
+        const firestoreRows = [];
+        allOrders.forEach(order => {
+            const items = order.items || [];
+            if (items.length === 0) {
+                // 沒有商品明細的訂單，建一筆空白記錄
+                firestoreRows.push(mapApiOrderToFirestore(order, { item_number: 'UNKNOWN', product_name: '（無商品明細）', quantity: 0, price: 0, subtotal: 0 }));
+            } else {
+                items.forEach(item => {
+                    firestoreRows.push(mapApiOrderToFirestore(order, item));
+                });
+            }
+        });
+
+        // 寫入 Firestore（批次寫入）
+        updateSyncProgress(40, `準備寫入 ${firestoreRows.length} 筆明細到資料庫...`);
+        const BATCH_SIZE = 200;
+        let written = 0, failCount = 0;
+        for (let i = 0; i < firestoreRows.length; i += BATCH_SIZE) {
+            const batch = db.batch();
+            const chunk = firestoreRows.slice(i, i + BATCH_SIZE);
+            chunk.forEach(row => {
+                const docId = row.orderId + '_' + row.productId;
+                const ref = db.collection(COLLECTION).doc(docId);
+                batch.set(ref, { ...row, importBatch: batchId });
+            });
+            try {
+                await withTimeout(batch.commit(), 15000);
+                written += chunk.length;
+            } catch (e) {
+                failCount++;
+                console.error('API 同步批次寫入失敗：', e.message);
+                if (failCount >= 5) {
+                    updateSyncProgress(0, '寫入持續失敗，可能是 Firestore 每日配額已用完');
+                    break;
+                }
+            }
+            const writeProgress = 40 + ((i + chunk.length) / firestoreRows.length) * 55;
+            updateSyncProgress(writeProgress, `寫入中... ${Math.min(i + chunk.length, firestoreRows.length)} / ${firestoreRows.length} 筆`);
+            await sleep(300);
+        }
+
+        // 記錄同步批次
+        try {
+            await db.collection(BATCH_COLLECTION).doc(batchId).set({
+                batchId, date: new Date().toISOString(),
+                totalRows: firestoreRows.length, imported: written, skipped: 0,
+                fileName: `API 同步 (${dateFrom} ~ ${dateTo})`,
+                source: 'mcp-api', dateFrom, dateTo,
+                orderCount: allOrders.length
+            });
+        } catch (e) { console.error('記錄批次失敗：', e); }
+
+        // 更新最後同步時間
+        localStorage.setItem('lastSyncTime', new Date().toISOString());
+        document.getElementById('lastSyncInfo').textContent = '上次同步：' + new Date().toLocaleString('zh-TW');
+
+        updateSyncProgress(100, '完成！');
+        showSyncResult('success', `同步完成！共 ${allOrders.length} 筆訂單、${written} 筆商品明細已寫入資料庫。`);
+
+        // 重新載入資料
+        await loadAllData();
+        loadImportHistory();
+        loadSyncHistory();
+
+    } catch (e) {
+        console.error('API 同步失敗：', e);
+        showSyncResult('error', '同步失敗：' + e.message);
+    } finally {
+        document.getElementById('btnStartSync').disabled = false;
+    }
+}
+
+function updateSyncProgress(percent, text) {
+    document.getElementById('syncBar').style.width = percent + '%';
+    document.getElementById('syncPercent').textContent = Math.round(percent) + '%';
+    document.getElementById('syncStatusText').textContent = text || '';
+    document.getElementById('syncDetail').textContent = '';
+}
+
+function showSyncResult(type, message) {
+    const el = document.getElementById('syncResult');
+    el.classList.remove('hidden');
+    el.className = 'mt-4 p-4 rounded-lg ' + (type === 'success' ? 'bg-green-50' : type === 'error' ? 'bg-red-50' : 'bg-blue-50');
+    document.getElementById('syncResultText').innerHTML = message;
+    // 3 秒後隱藏進度條
+    setTimeout(() => { document.getElementById('syncProgress').classList.add('hidden'); }, 2000);
+}
+
+// 載入同步紀錄
+async function loadSyncHistory() {
+    try {
+        const snap = await db.collection(BATCH_COLLECTION).where('source', '==', 'mcp-api').orderBy('date', 'desc').limit(10).get();
+        const el = document.getElementById('syncHistory');
+        if (snap.empty) { el.innerHTML = '<p class="text-gray-400">尚無同步紀錄</p>'; return; }
+        el.innerHTML = '<div class="space-y-2">' + snap.docs.map(doc => {
+            const d = doc.data();
+            return `<div class="flex items-center justify-between p-3 bg-gray-50 rounded-lg">
+                <div><p class="text-sm font-medium">API 同步 (${d.dateFrom || '?'} ~ ${d.dateTo || '?'})</p>
+                <p class="text-xs text-gray-400">${d.date ? new Date(d.date).toLocaleString('zh-TW') : '-'}</p></div>
+                <div class="text-right"><p class="text-sm">${formatNumber(d.orderCount || 0)} 筆訂單</p>
+                <p class="text-xs text-gray-400">${formatNumber(d.imported || 0)} 筆明細</p></div></div>`;
+        }).join('') + '</div>';
+    } catch (e) { console.error('載入同步紀錄失敗：', e); }
+}
+
+// 自動同步（登入後檢查）
+async function checkAutoSync() {
+    const apiKey = getApiKey();
+    if (!apiKey) return; // 沒設定 API Key 就跳過
+    const lastSync = localStorage.getItem('lastSyncTime');
+    if (!lastSync) return; // 從未同步過也跳過（讓用戶手動第一次同步）
+    const hoursSince = (Date.now() - new Date(lastSync).getTime()) / (1000 * 60 * 60);
+    if (hoursSince < 24) return; // 24 小時內同步過就跳過
+    // 自動背景同步最近 7 天
+    console.log('自動同步：距上次同步已超過 24 小時，開始同步最近 7 天訂單...');
+    const today = new Date().toISOString().split('T')[0];
+    const weekAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().split('T')[0];
+    document.getElementById('syncDateFrom').value = weekAgo;
+    document.getElementById('syncDateTo').value = today;
+    // 切換到匯入 Tab 並開始同步
+    switchTab('import');
+    await startApiSync();
+}
+
+// ============================
 // 初始化
 // ============================
-function initApp() { setupDragDrop(); loadAllData(); loadImportHistory(); }
+function initApp() { setupDragDrop(); initSyncUI(); loadAllData(); loadImportHistory(); checkAutoSync(); }
 </script>
 </body>
 </html>
