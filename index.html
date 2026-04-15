@@ -981,7 +981,6 @@ function mapApiOrderToFirestore(order, item) {
         orderStatus: order.status_name || '',
         memberId: order.member_account || '',
         memberName: order.buyer_name || '',
-        phone: String(order.buyer_mobile || ''),
         productId: String(item.item_number || ''),
         productName: item.product_name || '',
         quantity: parseInt(item.quantity) || 0,
