@@ -895,7 +895,8 @@ function renderCustomerAnalysis() {
 // 年度總覽
 // ============================
 function renderOverview() {
-    const data = allData; // 用全量資料，不受篩選器影響
+    // 用全量資料但排除無效訂單（取消/退貨/拒收等），不受日期篩選影響
+    const data = allData.filter(r => isValidStatus(r.orderStatus));
     if (!data.length) { document.getElementById('overviewBody').innerHTML = '<tr><td colspan="9" class="text-center py-8 text-gray-400">尚無資料</td></tr>'; return; }
 
     // 聚合年度 & 月度資料
