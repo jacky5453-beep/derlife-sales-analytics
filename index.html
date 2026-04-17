@@ -115,7 +115,8 @@
                 <label class="text-xs text-gray-500">結束日期</label>
                 <input type="date" id="filterDateTo" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
                 <select id="filterStatus" class="border rounded-lg px-3 py-1.5 text-sm focus:ring-2 focus:ring-brand outline-none" onchange="applyFilters()">
-                    <option value="all">全部狀態</option>
+                    <option value="valid">✅ 有效訂單（預設）</option>
+                    <option value="all">全部狀態（含取消/退貨）</option>
                 </select>
                 <!-- 快捷按鈕 -->
                 <div class="flex gap-1">
@@ -496,6 +497,11 @@ const COLLECTION = 'website-orders';
 const BATCH_COLLECTION = 'import-batches';
 const WHITELIST_COLLECTION = 'sales-whitelist';
 
+// 有效訂單狀態白名單（其餘視為無效訂單，不計入營收）
+// 無效狀態例：訂單已取消、訂單退貨處理中、訂單已退貨、訂單已退款、訂單退貨已取消、消費者拒絕收件、已到門市、已從門市取貨、門市逾期未取貨
+const VALID_ORDER_STATUSES = ['訂單處理中', '訂單已付款', '備貨中，準備出貨', '訂單已出貨', '商品已送達', '理貨中'];
+function isValidStatus(s) { return VALID_ORDER_STATUSES.includes(s); }
+
 // ============================
 // 全域變數
 // ============================
@@ -621,7 +627,15 @@ function applyFilters() {
         const d = row.orderDate ? row.orderDate.slice(0, 10) : '';
         if (dateFrom && d < dateFrom) return false;
         if (dateTo && d > dateTo) return false;
-        if (status !== 'all' && row.orderStatus !== status) return false;
+        // status 篩選邏輯：
+        // 'valid'（預設）：只計算有效訂單，排除取消/退貨/拒收/門市取貨等
+        // 'all'：全部訂單（含無效）
+        // 其他：指定單一狀態
+        if (status === 'valid') {
+            if (!isValidStatus(row.orderStatus)) return false;
+        } else if (status !== 'all') {
+            if (row.orderStatus !== status) return false;
+        }
         return true;
     });
     renderDashboard(); renderProductAnalysis(); renderCustomerAnalysis();
@@ -629,7 +643,7 @@ function applyFilters() {
 function resetFilters() {
     document.getElementById('filterDateFrom').value = '';
     document.getElementById('filterDateTo').value = '';
-    document.getElementById('filterStatus').value = 'all';
+    document.getElementById('filterStatus').value = 'valid';
     applyFilters();
 }
 // 快捷日期範圍
@@ -666,8 +680,13 @@ function setQuickRange(range) {
 function populateFilters() {
     const statuses = new Set();
     allData.forEach(row => { if (row.orderStatus) statuses.add(row.orderStatus); });
-    const ss = document.getElementById('filterStatus'); ss.innerHTML = '<option value="all">全部狀態</option>';
-    [...statuses].sort().forEach(s => { ss.innerHTML += `<option value="${s}">${s}</option>`; });
+    const ss = document.getElementById('filterStatus');
+    // 預設：只顯示有效訂單（排除取消/退貨/拒收等）
+    ss.innerHTML = '<option value="valid">✅ 有效訂單（預設）</option><option value="all">全部狀態（含取消/退貨）</option>';
+    [...statuses].sort().forEach(s => {
+        const mark = isValidStatus(s) ? '' : ' ⚠️';
+        ss.innerHTML += `<option value="${s}">${s}${mark}</option>`;
+    });
     // 自動設定日期範圍為資料的最小/最大日期
     const dates = allData.map(r => r.orderDate ? r.orderDate.slice(0, 10) : '').filter(d => d);
     if (dates.length) {
@@ -1317,6 +1336,22 @@ async function startApiSync() {
             return;
         }
 
+        // 過濾掉無效訂單（已取消、退貨、退款、拒收、門市取貨等）
+        const rawCount = allOrders.length;
+        const skippedOrders = allOrders.filter(o => !isValidStatus(o.status_name || ''));
+        allOrders = allOrders.filter(o => isValidStatus(o.status_name || ''));
+        const skippedCount = rawCount - allOrders.length;
+        if (skippedCount > 0) {
+            updateSyncProgress(32, `已過濾 ${skippedCount} 筆無效訂單（取消/退貨/拒收等），保留 ${allOrders.length} 筆有效訂單...`);
+        }
+
+        if (allOrders.length === 0) {
+            updateSyncProgress(100, '完成');
+            showSyncResult('info', `此日期範圍內共 ${rawCount} 筆訂單，全部為無效狀態，未寫入任何資料。`);
+            document.getElementById('btnStartSync').disabled = false;
+            return;
+        }
+
         // 展開訂單明細（一筆訂單可能有多個商品）
         updateSyncProgress(35, '整理訂單明細...');
         const firestoreRows = [];
@@ -1376,7 +1411,8 @@ async function startApiSync() {
         document.getElementById('lastSyncInfo').textContent = '上次同步：' + new Date().toLocaleString('zh-TW');
 
         updateSyncProgress(100, '完成！');
-        showSyncResult('success', `同步完成！共 ${allOrders.length} 筆訂單、${written} 筆商品明細已寫入資料庫。`);
+        const filterMsg = skippedCount > 0 ? `<br>已自動過濾 ${skippedCount} 筆無效訂單（取消/退貨/拒收/門市取貨等）。` : '';
+        showSyncResult('success', `同步完成！共 ${allOrders.length} 筆有效訂單、${written} 筆商品明細已寫入資料庫。${filterMsg}`);
 
         // 重新載入資料
         await loadAllData();
