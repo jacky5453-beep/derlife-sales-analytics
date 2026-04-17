@@ -1072,6 +1072,37 @@ async function startImport() {
     document.getElementById('importResult').classList.add('hidden');
     const batchDate = new Date().toISOString(), batchId = batchDate.split('T')[0]+'_'+Date.now();
     let imported = 0; const total = pendingImportData.length;
+
+    // 步驟 1：先刪除資料庫中同 orderId 的舊資料
+    // 避免因 productId 格式改變（例如原本空值、後來有值），造成舊 doc 無法被新 doc 覆蓋而殘留重複
+    const uniqueOrderIds = [...new Set(pendingImportData.map(r => r.orderId))].filter(id => id);
+    let deletedCount = 0;
+    const IN_CHUNK = 30; // Firestore `in` 查詢單次最多 30 個值
+    for (let i = 0; i < uniqueOrderIds.length; i += IN_CHUNK) {
+        const ids = uniqueOrderIds.slice(i, i + IN_CHUNK);
+        try {
+            const snap = await withTimeout(db.collection(COLLECTION).where('orderId', 'in', ids).get(), 20000);
+            if (!snap.empty) {
+                const docs = snap.docs;
+                // 單一 batch 最多 500 筆
+                for (let j = 0; j < docs.length; j += 500) {
+                    const delBatch = db.batch();
+                    docs.slice(j, j + 500).forEach(doc => delBatch.delete(doc.ref));
+                    await withTimeout(delBatch.commit(), 20000);
+                }
+                deletedCount += docs.length;
+            }
+        } catch (e) {
+            console.error('清理舊資料失敗：', e.message);
+            document.getElementById('importDetail').textContent = `清理舊資料失敗：${e.message}，改用覆蓋模式繼續`;
+        }
+        const prog = Math.min(((i + IN_CHUNK) / uniqueOrderIds.length) * 100, 100);
+        document.getElementById('importDetail').textContent = `清理舊資料中... 已處理 ${Math.min(i + IN_CHUNK, uniqueOrderIds.length)}/${uniqueOrderIds.length} 筆訂單，已刪除 ${deletedCount} 筆舊列`;
+        document.getElementById('importBar').style.width = (prog * 0.3) + '%'; // 清理階段佔進度條前 30%
+        document.getElementById('importPercent').textContent = Math.round(prog * 0.3) + '%';
+    }
+
+    // 步驟 2：寫入新資料
     // 用 doc ID = orderId_productId 做天然去重（set 會覆蓋，不需先讀取）
     const BATCH_SIZE = 200;
     let failCount = 0;
@@ -1095,18 +1126,20 @@ async function startImport() {
                 break;
             }
         }
-        const progress = Math.min(((i+chunk.length)/total)*100, 100);
-        document.getElementById('importBar').style.width = progress+'%';
-        document.getElementById('importPercent').textContent = Math.round(progress)+'%';
-        if (failCount === 0) document.getElementById('importDetail').textContent = `已處理 ${Math.min(i+chunk.length,total)} / ${total} 筆`;
+        const writeProg = Math.min(((i+chunk.length)/total)*100, 100);
+        // 寫入階段佔進度條後 70%（前 30% 為清理階段）
+        const overallProg = 30 + writeProg * 0.7;
+        document.getElementById('importBar').style.width = overallProg+'%';
+        document.getElementById('importPercent').textContent = Math.round(overallProg)+'%';
+        if (failCount === 0) document.getElementById('importDetail').textContent = `寫入中... ${Math.min(i+chunk.length,total)} / ${total} 筆`;
         await sleep(300);
     }
     // 記錄批次
-    try { await db.collection(BATCH_COLLECTION).doc(batchId).set({ batchId, date: batchDate, totalRows: total, imported, skipped: 0, fileName: document.getElementById('previewFileName').textContent }); } catch(e) {}
+    try { await db.collection(BATCH_COLLECTION).doc(batchId).set({ batchId, date: batchDate, totalRows: total, imported, skipped: deletedCount, fileName: document.getElementById('previewFileName').textContent }); } catch(e) {}
     document.getElementById('importProgress').classList.add('hidden');
     const r = document.getElementById('importResult'); r.classList.remove('hidden');
     r.className = r.className.replace(/bg-\w+-\d+/g,''); r.classList.add(imported>0?'bg-green-50':'bg-yellow-50');
-    document.getElementById('importResultText').innerHTML = `匯入完成！已處理 <strong>${formatNumber(imported)}</strong> 筆資料（重複資料會自動覆蓋）。`;
+    document.getElementById('importResultText').innerHTML = `匯入完成！已清除舊資料 <strong>${formatNumber(deletedCount)}</strong> 筆，新寫入 <strong>${formatNumber(imported)}</strong> 筆。`;
     pendingImportData = [];
     await loadAllData(); loadImportHistory();
 }
