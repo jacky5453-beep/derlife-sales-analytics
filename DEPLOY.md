@@ -11,3 +11,6 @@
 cd "/Users/jacky/Desktop/claude/claude code/官網銷售分析系統"
 git add -A && git commit -m "描述" && git push origin main
 ```
+
+## 最後部署日期
+- 2026-04-20：修正初次載入儀表板未套用狀態篩選 + 成長率顏色改台股慣例
