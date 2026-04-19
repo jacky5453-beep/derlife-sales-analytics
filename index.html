@@ -940,8 +940,8 @@ function renderOverview() {
     function fmtGrowth(cur, prev) {
         if (!prev || prev === 0) return '<span class="text-gray-400">—</span>';
         const pct = ((cur - prev) / prev * 100).toFixed(1);
-        if (pct > 0) return `<span class="text-green-600 font-medium">▲${pct}%</span>`;
-        if (pct < 0) return `<span class="text-red-500 font-medium">▼${Math.abs(pct)}%</span>`;
+        if (pct > 0) return `<span class="text-red-500 font-medium">▲${pct}%</span>`;
+        if (pct < 0) return `<span class="text-green-600 font-medium">▼${Math.abs(pct)}%</span>`;
         return '<span class="text-gray-500">0%</span>';
     }
 
@@ -1163,9 +1163,8 @@ async function loadAllData() {
     try {
         const snap = await db.collection(COLLECTION).get();
         allData = []; snap.forEach(doc => { const d = doc.data(); allData.push(d); });
-        filteredData = [...allData];
         document.getElementById('dataStatus').textContent = `已載入 ${formatNumber(allData.length)} 筆資料`;
-        if (allData.length > 0) { populateFilters(); renderDashboard(); renderProductAnalysis(); renderCustomerAnalysis(); renderDataManagement(); renderDataTable(); }
+        if (allData.length > 0) { populateFilters(); applyFilters(); renderDataManagement(); renderDataTable(); }
         const tab = document.querySelector('.tab-btn.active')?.dataset.tab; if (tab) checkNoData(tab);
     } catch(e) { console.error('載入失敗：',e); document.getElementById('dataStatus').textContent = '載入失敗'; }
     finally { indicator.classList.add('hidden'); }
