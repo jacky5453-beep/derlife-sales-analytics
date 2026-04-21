@@ -687,13 +687,12 @@ function populateFilters() {
         const mark = isValidStatus(s) ? '' : ' ⚠️';
         ss.innerHTML += `<option value="${s}">${s}${mark}</option>`;
     });
-    // 自動設定日期範圍為資料的最小/最大日期
-    const dates = allData.map(r => r.orderDate ? r.orderDate.slice(0, 10) : '').filter(d => d);
-    if (dates.length) {
-        dates.sort();
-        document.getElementById('filterDateFrom').value = dates[0];
-        document.getElementById('filterDateTo').value = dates[dates.length - 1];
-    }
+    // 預設顯示今年資料（1/1 ~ 今天）
+    const today = new Date();
+    const yearStart = today.getFullYear() + '-01-01';
+    const todayStr = today.toISOString().slice(0, 10);
+    document.getElementById('filterDateFrom').value = yearStart;
+    document.getElementById('filterDateTo').value = todayStr;
 }
 
 // ============================
