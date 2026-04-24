@@ -155,11 +155,11 @@
                 </div>
                 <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
                     <div class="bg-white rounded-xl p-5 shadow-sm border">
-                        <h3 class="text-sm font-semibold text-gray-700 mb-3">月度營業額趨勢</h3>
+                        <h3 id="titleRevenueTrend" class="text-sm font-semibold text-gray-700 mb-3">月度營業額趨勢</h3>
                         <div class="chart-container" style="height:300px;"><canvas id="chartRevenueTrend"></canvas></div>
                     </div>
                     <div class="bg-white rounded-xl p-5 shadow-sm border">
-                        <h3 class="text-sm font-semibold text-gray-700 mb-3">月度訂單數趨勢</h3>
+                        <h3 id="titleOrderTrend" class="text-sm font-semibold text-gray-700 mb-3">月度訂單數趨勢</h3>
                         <div class="chart-container" style="height:300px;"><canvas id="chartOrderTrend"></canvas></div>
                     </div>
                 </div>
@@ -169,7 +169,7 @@
                         <div class="chart-container" style="height:300px;"><canvas id="chartOrderStatus"></canvas></div>
                     </div>
                     <div class="bg-white rounded-xl p-5 shadow-sm border">
-                        <h3 class="text-sm font-semibold text-gray-700 mb-3">月度客單價變化</h3>
+                        <h3 id="titleAOVTrend" class="text-sm font-semibold text-gray-700 mb-3">月度客單價變化</h3>
                         <div class="chart-container" style="height:300px;"><canvas id="chartAOVTrend"></canvas></div>
                     </div>
                 </div>
@@ -718,10 +718,20 @@ function renderDashboard() {
     document.getElementById('kpiOrders').textContent = formatNumber(orderCount);
     document.getElementById('kpiAOV').textContent = formatCurrency(aov);
     document.getElementById('kpiQuantity').textContent = formatNumber(totalQty);
-    // 月度資料
+    // 依日期範圍決定粒度：範圍 ≤ 31 天 → 每日；否則 → 月度
+    const fromVal = document.getElementById('filterDateFrom').value;
+    const toVal = document.getElementById('filterDateTo').value;
+    let useDaily = false;
+    if (fromVal && toVal) {
+        const diffDays = Math.floor((new Date(toVal) - new Date(fromVal)) / 86400000) + 1;
+        useDaily = diffDays <= 31;
+    }
     const md = new Map();
     data.forEach(row => {
-        const d = new Date(row.orderDate), key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+        const d = new Date(row.orderDate);
+        const key = useDaily
+            ? `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`
+            : `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
         if (!md.has(key)) md.set(key, { rev: 0, ord: new Set() });
         const m = md.get(key); m.rev += row.subtotal; m.ord.add(row.orderId);
     });
@@ -729,15 +739,22 @@ function renderDashboard() {
     const mRev = sm.map(k => md.get(k).rev);
     const mOrd = sm.map(k => md.get(k).ord.size);
     const mAov = sm.map((k,i) => mOrd[i]>0 ? mRev[i]/mOrd[i] : 0);
-    renderChart('chartRevenueTrend','line',{labels:sm,datasets:[{label:'營業額',data:mRev,borderColor:'#C3F000',backgroundColor:'rgba(195,240,0,0.1)',fill:true,tension:0.3,pointRadius:4}]},{scales:{y:{beginAtZero:true,ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}}}});
-    renderChart('chartOrderTrend','bar',{labels:sm,datasets:[{label:'訂單數',data:mOrd,backgroundColor:'rgba(255,170,0,0.7)',borderRadius:4}]},{scales:{y:{beginAtZero:true}}});
+    // X 軸顯示格式：每日模式顯示 MM/DD，月度模式顯示原本 YYYY-MM
+    const displayLabels = useDaily ? sm.map(k => k.slice(5).replace('-', '/')) : sm;
+    // 動態更新圖表標題
+    const trendPrefix = useDaily ? '每日' : '月度';
+    document.getElementById('titleRevenueTrend').textContent = `${trendPrefix}營業額趨勢`;
+    document.getElementById('titleOrderTrend').textContent = `${trendPrefix}訂單數趨勢`;
+    document.getElementById('titleAOVTrend').textContent = `${trendPrefix}客單價變化`;
+    renderChart('chartRevenueTrend','line',{labels:displayLabels,datasets:[{label:'營業額',data:mRev,borderColor:'#C3F000',backgroundColor:'rgba(195,240,0,0.1)',fill:true,tension:0.3,pointRadius:4}]},{scales:{y:{beginAtZero:true,ticks:{callback:v=>'$'+(v/1000).toFixed(0)+'K'}}}});
+    renderChart('chartOrderTrend','bar',{labels:displayLabels,datasets:[{label:'訂單數',data:mOrd,backgroundColor:'rgba(255,170,0,0.7)',borderRadius:4}]},{scales:{y:{beginAtZero:true}}});
     // 狀態分佈
     const sc = new Map(), so = new Map();
     data.forEach(row => { if (!so.has(row.orderId)) { so.set(row.orderId, row.orderStatus); sc.set(row.orderStatus, (sc.get(row.orderStatus)||0)+1); }});
     const sl = [...sc.keys()], sv = sl.map(k=>sc.get(k));
     const colors = ['#C3F000','#FFAA00','#4ECDC4','#FF6B6B','#45B7D1','#96CEB4','#DDA0DD','#778899'];
     renderChart('chartOrderStatus','doughnut',{labels:sl,datasets:[{data:sv,backgroundColor:colors.slice(0,sl.length)}]},{plugins:{legend:{position:'right',labels:{boxWidth:12,font:{size:11}}}}});
-    renderChart('chartAOVTrend','line',{labels:sm,datasets:[{label:'客單價',data:mAov,borderColor:'#FFAA00',backgroundColor:'rgba(255,170,0,0.1)',fill:true,tension:0.3,pointRadius:4}]},{scales:{y:{beginAtZero:false,ticks:{callback:v=>'$'+Math.round(v)}}}});
+    renderChart('chartAOVTrend','line',{labels:displayLabels,datasets:[{label:'客單價',data:mAov,borderColor:'#FFAA00',backgroundColor:'rgba(255,170,0,0.1)',fill:true,tension:0.3,pointRadius:4}]},{scales:{y:{beginAtZero:false,ticks:{callback:v=>'$'+Math.round(v)}}}});
 
     // 季度營業額比較（每年一組 dataset，X 軸 Q1~Q4）
     const qd = new Map(); // { year -> { Q1:rev, Q2:rev, ... } }
