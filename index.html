@@ -644,12 +644,20 @@ function checkNoData(tabName) {
 // ============================
 // 篩選器
 // ============================
+// 把 UTC ISO 字串轉成本地時區（台北）的 YYYY-MM-DD，避免凌晨訂單被算成前一天
+function toLocalDateStr(iso) {
+    if (!iso) return '';
+    const dt = new Date(iso);
+    if (isNaN(dt.getTime())) return '';
+    return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
+}
+
 function applyFilters() {
     const dateFrom = document.getElementById('filterDateFrom').value;
     const dateTo = document.getElementById('filterDateTo').value;
     const status = document.getElementById('filterStatus').value;
     filteredData = allData.filter(row => {
-        const d = row.orderDate ? row.orderDate.slice(0, 10) : '';
+        const d = toLocalDateStr(row.orderDate);
         if (dateFrom && d < dateFrom) return false;
         if (dateTo && d > dateTo) return false;
         // status 篩選邏輯：
@@ -675,7 +683,8 @@ function resetFilters() {
 function setQuickRange(range) {
     const today = new Date();
     let from, to;
-    const fmt = d => d.toISOString().slice(0, 10);
+    // 改用本地時區格式化，避免 UTC 換日把今天算成昨天
+    const fmt = d => `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
     switch(range) {
         case 'today':
             from = today;
@@ -719,7 +728,7 @@ function populateFilters() {
     // 預設顯示今年資料（1/1 ~ 今天）
     const today = new Date();
     const yearStart = today.getFullYear() + '-01-01';
-    const todayStr = today.toISOString().slice(0, 10);
+    const todayStr = `${today.getFullYear()}-${String(today.getMonth()+1).padStart(2,'0')}-${String(today.getDate()).padStart(2,'0')}`;
     document.getElementById('filterDateFrom').value = yearStart;
     document.getElementById('filterDateTo').value = todayStr;
 }
