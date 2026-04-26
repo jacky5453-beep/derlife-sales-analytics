@@ -514,14 +514,25 @@ let currentUser = null, isAdmin = false;
 // ============================
 // 登入系統
 // ============================
+// 判斷是否為手機（手機用 redirect、桌機用 popup）
+function isMobileDevice() {
+    return /Android|iPhone|iPad|iPod|Mobile|Opera Mini/i.test(navigator.userAgent);
+}
+
 async function googleLogin() {
     document.getElementById('loginBtn').disabled = true;
     document.getElementById('loginLoading').classList.remove('hidden');
     document.getElementById('loginError').classList.add('hidden');
     try {
         const provider = new firebase.auth.GoogleAuthProvider();
-        const result = await auth.signInWithPopup(provider);
-        await verifyWhitelist(result.user);
+        if (isMobileDevice()) {
+            // 手機改用 redirect，避免 popup / 第三方 cookie 被擋
+            await auth.signInWithRedirect(provider);
+            // redirect 後頁面會跳走，不需等待結果（由 getRedirectResult 處理）
+        } else {
+            const result = await auth.signInWithPopup(provider);
+            await verifyWhitelist(result.user);
+        }
     } catch (e) {
         document.getElementById('loginError').textContent = '登入失敗：' + e.message;
         document.getElementById('loginError').classList.remove('hidden');
@@ -584,6 +595,19 @@ async function logout() {
     document.getElementById('loginLoading').classList.add('hidden');
     document.getElementById('loginError').classList.add('hidden');
 }
+
+// 處理 redirect 登入回來的結果（手機流程）
+auth.getRedirectResult().then(async (result) => {
+    if (result && result.user) {
+        document.getElementById('loginLoading').classList.remove('hidden');
+        await verifyWhitelist(result.user);
+    }
+}).catch((e) => {
+    document.getElementById('loginError').textContent = '登入失敗：' + e.message;
+    document.getElementById('loginError').classList.remove('hidden');
+    document.getElementById('loginBtn').disabled = false;
+    document.getElementById('loginLoading').classList.add('hidden');
+});
 
 // 自動登入檢查
 auth.onAuthStateChanged(async (user) => {
