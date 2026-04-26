@@ -120,6 +120,7 @@
                 </select>
                 <!-- 快捷按鈕 -->
                 <div class="flex gap-1">
+                    <button onclick="setQuickRange('today')" class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-brand hover:text-brand-dark transition">本日</button>
                     <button onclick="setQuickRange('thisMonth')" class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-brand hover:text-brand-dark transition">本月</button>
                     <button onclick="setQuickRange('lastMonth')" class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-brand hover:text-brand-dark transition">上月</button>
                     <button onclick="setQuickRange('last7')" class="text-xs px-2 py-1 rounded bg-gray-100 hover:bg-brand hover:text-brand-dark transition">近7天</button>
@@ -652,6 +653,10 @@ function setQuickRange(range) {
     let from, to;
     const fmt = d => d.toISOString().slice(0, 10);
     switch(range) {
+        case 'today':
+            from = today;
+            to = today;
+            break;
         case 'thisMonth':
             from = new Date(today.getFullYear(), today.getMonth(), 1);
             to = today;
